@@ -9,11 +9,9 @@
 // window stops taking samples; afterwards it resumes and the pre-trigger
 // samples are pushed out one by one as new ones arrive.
 //
-// Optionally a first-order low-pass (the DPP-PHA "low-frequency limitation",
-// EnergyFilterLFLimitation) is applied on top of the running mean. With a time
-// constant long compared with the pole-zero tail it keeps the baseline from
-// following the tail, so the next pulse sees a long-term (resting) baseline
-// rather than one dragged down by the previous pulse's undershoot.
+// Optionally a first-order low-pass is applied on top of the running mean.
+// CAEN support says the firmware has none (2026-10-19); it is kept as an
+// option for the fits described in the README.
 //
 // Optionally the restart is conditional (UM5960: "once the trapezoid is
 // returned to the baseline, the averaging restarts"): after the holdoff the
@@ -23,11 +21,16 @@
 // trapezoid's falling edge, which sweeps through the band at the end of the
 // holdoff, from satisfying the condition. restartThr <= 0 restarts
 // unconditionally after the holdoff.
+//
+// With refreezeSamples > 0 the return is checked only once, at the end of
+// each freeze: if the trapezoid is not back within restartThr, the baseline
+// is frozen for another refreezeSamples, and so on. This is how CAEN support
+// describes EnergyFilterLFLimitation = On (2026-10-19).
 class BaselineRestorer {
 public:
   BaselineRestorer(Int_t meanSamples, Bool_t lfOn, Double_t lfTauNs,
                    Double_t samplePeriodNs, Double_t restartThr = 0.0,
-                   Int_t restartHold = 1);
+                   Int_t restartHold = 1, Int_t refreezeSamples = 0);
   // Feed the trapezoid output of sample n. Ignored while frozen.
   void Update(Long64_t n, Double_t trapezoid);
   // Freeze from sample n for holdoffSamples; returns the frozen value.
@@ -52,6 +55,7 @@ private:
   Bool_t awaitingReturn_;
   Int_t restartHold_;
   Int_t inBand_;
+  Int_t refreezeSamples_;
 };
 
 #endif

@@ -25,30 +25,43 @@ struct Config {
   // samples centred on the peaking point.
   Int_t peakingAvgSamples = 16;
   // EnergyFilterBaselineAvg = Medium = 1024 samples at 8 ns = 8.2 us (UM7788;
-  // the 2740 PHA has no decimation). The long-window stand-in used before,
-  // 32768 (262 us), is excluded by the measured baseline memory (README,
-  // "Baseline restorer in production"); 16384 is High.
+  // the 2740 PHA has no decimation); 16384 is High. 32768 (262 us), used in
+  // older results, is ruled out by run 97 (README, "Baseline restorer in
+  // production").
   Int_t baselineMeanSamples = 1024;
   // Clock decimation of the baseline accumulator: the running mean covers
   // baselineMeanSamples samples of a clock divided by this factor, i.e.
   // baselineMeanSamples * baselineDecimation ADC samples. 1 = the 125 MS/s ADC
   // clock (1024 -> 8.2 us); 32 = 1024 samples on a 3.9 MS/s clock (1024 ->
-  // 262 us), a reading the measured baseline memory excludes.
+  // 262 us), ruled out by run 97.
   Int_t baselineDecimation = 1;
-  // A first-order low-pass on the running-mean baseline (one reading of the
-  // DPP-PHA EnergyFilterLFLimitation). The run-97 baseline memory allows at
-  // most ~16-32 us; 16.384 us (a 2^11-sample shift) is the best fit together
-  // with the restart below. Time constants of 65 us or more are excluded.
+  // A first-order low-pass on the running-mean baseline. CAEN support says the
+  // firmware has no such filter (2026-10-19). It stays on by default only
+  // because, with the restart below, it reproduces a small shift that pulses
+  // 80-500 us earlier cause in run 97, whose real cause is not known (README,
+  // "Baseline restorer in production"). Turn it off for the firmware as CAEN
+  // describes it.
   Bool_t lfFilterOn = true;
   Double_t lfFilterTauUs = 16.384;
   // Conditional baseline restart: after the holdoff the baseline stays frozen
   // until the trapezoid is back within this many ADC of the frozen baseline,
   // for baselineRestartHoldSamples consecutive samples (> 1 keeps the
-  // trapezoid's falling edge from triggering it). 80 ADC / 2 us fits the run-97
-  // baseline memory and the ch-4 overshoot (README); 0 restarts
-  // unconditionally after the holdoff, the documented behaviour.
+  // trapezoid's falling edge from triggering it). 80 ADC / 2 us fits run 97
+  // and the ch-4 overshoot runs (README). 0 restarts unconditionally after the
+  // holdoff, as the firmware does with EnergyFilterLFLimitation = Off.
   Double_t baselineRestartThrADC = 80.0;
   Int_t baselineRestartHoldSamples = 250;
+  // How the return check is made. Off: every sample after the holdoff, as
+  // above. On: once at the end of each holdoff; if the trapezoid is not back
+  // within baselineRestartThrADC of the baseline, the baseline is frozen for
+  // another holdoff, and so on (CAEN support, 2026-10-19, for
+  // EnergyFilterLFLimitation = On). baselineRestartHoldSamples is then unused.
+  Bool_t baselineRefreeze = false;
+  // Subtract the true baseline instead of the restorer's: what the trapezoid
+  // gives for the ADC offset alone, with no pulses and no noise. Earlier
+  // pulses then never enter the baseline, which isolates the trapezoid's
+  // own pulse-history effect from anything the restorer adds.
+  Bool_t baselineIdeal = false;
   // The DPP-PHA baseline is inhibited for the whole trapezoid
   // (2 * rise + flat = 7000 ns) plus EnergyFilterBaselineGuardT (= 0).
   Double_t baselineHoldoff_ns = 7000.0;

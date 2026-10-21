@@ -61,6 +61,8 @@ private:
   BaselineRestorer baseline_;
 
   Int_t warmupSamples_;
+  // Trapezoid output for the ADC offset alone (Config::baselineIdeal).
+  Double_t idealBaseline_;
   Long64_t resetSample_;
   Long64_t nextEvent_;
   Long64_t lastTriggerSample_;

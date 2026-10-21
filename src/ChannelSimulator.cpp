@@ -12,7 +12,8 @@ ChannelSimulator::ChannelSimulator(const Config &cfg, Int_t channel,
               cfg.TrapDecay_ns()),
       baseline_(cfg.BaselineWindowSamples(), cfg.lfFilterOn,
                 cfg.LfFilterTauNs(), cfg.samplePeriod_ns,
-                cfg.baselineRestartThrADC, cfg.baselineRestartHoldSamples),
+                cfg.baselineRestartThrADC, cfg.baselineRestartHoldSamples,
+                cfg.baselineRefreeze ? cfg.HoldoffSamples() : 0),
       resetSample_(0), nextEvent_(0),
       lastTriggerSample_(-1), lastTriggerTime_ns_(0.0), lastTriggerAmp_(0.0),
       snippetPair_(-1), snippetStart_(-1), snippetEnd_(-1),
@@ -20,12 +21,22 @@ ChannelSimulator::ChannelSimulator(const Config &cfg, Int_t channel,
   // Filter memory, then a full baseline window, then the peaking average and
   // the configured margin: after this many samples every state variable is
   // exact again. With the low-pass stage on, add ~5 time constants so the
-  // baseline state has settled too.
+  // baseline state has settled too. A baseline that waits for the trapezoid
+  // to return can stay frozen for longer than its window, so it needs a longer
+  // rebuild: the low-pass's 82 us already suffices (a 500 us rebuild gives the
+  // same run-97 comparison), and without the low-pass 500 us is added.
   warmupSamples_ = filter_.Length() + cfg.BaselineWindowSamples() +
                    cfg.peakingAvgSamples;
   if (cfg.lfFilterOn && cfg.LfFilterTauNs() > 0.0)
     warmupSamples_ += Int_t(5.0 * cfg.LfFilterTauNs() / cfg.samplePeriod_ns);
+  else if (cfg.baselineRestartThrADC > 0.0)
+    warmupSamples_ += Int_t(500000.0 / cfg.samplePeriod_ns);
   warmupSamples_ += cfg.warmupMarginSamples;
+  TrapezoidFilter offsetOnly(cfg.RiseSamples(), cfg.FlatSamples(),
+                             cfg.samplePeriod_ns, cfg.TrapDecay_ns());
+  idealBaseline_ = 0.0;
+  for (Int_t i = 0; i < 4 * offsetOnly.Length(); i++)
+    idealBaseline_ = offsetOnly.Process(cfg.adcOffset);
 }
 
 Long64_t ChannelSimulator::TriggerSample(Long64_t eventIndex) const {
@@ -86,6 +97,8 @@ void ChannelSimulator::HandleTriggers(Long64_t n) {
     r.endSample = r.startSample + avg - 1;
     r.sum = 0.0;
     r.frozenBaseline = baseline_.Freeze(n, cfg_.HoldoffSamples());
+    if (cfg_.baselineIdeal)
+      r.frozenBaseline = idealBaseline_;
     if (lastTriggerSample_ >= 0) {
       r.dtPrev_us = (events_.Time_ns(i) - lastTriggerTime_ns_) / 1000.0;
       r.prevAmp = lastTriggerAmp_;

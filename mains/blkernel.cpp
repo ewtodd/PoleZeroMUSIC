@@ -1,7 +1,7 @@
-// blkernel - the baseline restorer's memory kernel, measured from a hit
-// stream, to tell a long boxcar baseline (accumulator on a decimated clock)
-// from a short boxcar followed by a one-pole low-pass (the DPP-PHA
-// EnergyFilterLFLimitation).
+// blkernel - how much a pulse shifts the energy of later pulses on the same
+// channel, against how long before them it came, measured from a hit stream.
+// It shows how long the trapezoid baseline remembers a pulse, which tells a
+// long averaging window (or a low-pass) from a short one.
 //
 // Every hit on a pole-zero mismatched channel leaves a trapezoid undershoot
 // (R) or overshoot (L) that the baseline averages in for as long as the

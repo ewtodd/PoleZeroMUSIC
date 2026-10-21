@@ -46,8 +46,7 @@ done
 # Crop the PDFs to their content (pdfcrop comes from the LaTeX flake in doc/).
 (
   cd doc
-  nix develop --command bash -c 'for f in figs/*.pdf; do pdfcrop "$f" "$f" > /dev/null 2>&1; done'
+  # doc/ is not tracked by git, so its flake is addressed as a path.
+  nix develop path:. --command bash -c 'for f in figs/*.pdf; do pdfcrop "$f" "$f" > /dev/null 2>&1; done'
 )
-# The PNGs also next to the simulation files that made them.
-cp doc/figs/png/*.png output/figures/
-ls -la doc/figs doc/figs/png output/figures
+ls -la doc/figs doc/figs/png

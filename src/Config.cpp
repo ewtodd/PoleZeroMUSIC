@@ -105,6 +105,16 @@ Bool_t Config::ParseCommandLine(Int_t argc, char **argv) {
                    value == "True" || value == "kTRUE";
       ok = kTRUE;
     }
+    if (!ok && name == "baselineRefreeze") {
+      baselineRefreeze = value == "1" || value == "on" || value == "true" ||
+                         value == "True" || value == "kTRUE";
+      ok = kTRUE;
+    }
+    if (!ok && name == "baselineIdeal") {
+      baselineIdeal = value == "1" || value == "on" || value == "true" ||
+                      value == "True" || value == "kTRUE";
+      ok = kTRUE;
+    }
     if (!ok) {
       std::cerr << "Unknown parameter --" << name << std::endl;
       return kFALSE;
@@ -131,6 +141,10 @@ void Config::Print(std::ostream &os) const {
      << " (tau " << lfFilterTauUs << " us)" << std::endl;
   os << "  baselineRestartThrADC = " << baselineRestartThrADC
      << " (hold " << baselineRestartHoldSamples << " samples)" << std::endl;
+  os << "  baselineRefreeze     = " << (baselineRefreeze ? "true" : "false")
+     << std::endl;
+  os << "  baselineIdeal        = " << (baselineIdeal ? "true" : "false")
+     << std::endl;
   os << "  baselineHoldoff_ns   = " << baselineHoldoff_ns << std::endl;
   os << "  warmupMarginSamples  = " << warmupMarginSamples << std::endl;
   os << "  triggerHoldoff_ns    = " << triggerHoldoff_ns << std::endl;

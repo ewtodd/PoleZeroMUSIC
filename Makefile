@@ -27,7 +27,7 @@ MUSIC_SRCS := PulseHistory Constants
 MUSIC_OBJS := $(addprefix $(BUILD_DIR)/music_,$(addsuffix .o,$(MUSIC_SRCS)))
 HEADERS    := $(wildcard $(INC_DIR)/*.hpp)
 
-BINS := simulate analyze realwave realdt kernelstudy taustudy figures wavecheck deconvolve optfilter applicability plotbaseline blkernel wavenoise
+BINS := simulate analyze realwave realdt kernelstudy taustudy figures wavecheck deconvolve optfilter applicability blkernel wavenoise notefigures
 BIN_PATHS := $(addprefix $(BIN_DIR)/,$(BINS))
 
 .PHONY: all clean

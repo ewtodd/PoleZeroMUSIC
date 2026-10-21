@@ -24,7 +24,9 @@ bash scripts/real_data.sh   # run-70 waveforms and hit-stream profiles -> output
 bash scripts/kernel_study.sh # what limits the correction -> output/kernel_study
 bash scripts/tau_recovery.sh # does the fit return the input tau -> output/tau_recovery
 bash scripts/applicability.sh # rate x mismatch grid for the applicability figure -> output/applicability
-bash scripts/figures.sh     # the figures of doc/polezero.tex -> doc/figs (PDF), doc/figs/png and output/figures (PNG)
+bash scripts/figures.sh     # the figures of doc/polezero.tex -> doc/figs (PDF) and doc/figs/png (PNG)
+bash scripts/paper_sim.sh   # the simulation study and figures of doc/kernel_note.tex (PDF and PNG)
+bash scripts/run97_figure.sh # the run-97 before/after figure of doc/kernel_note.tex (needs ~/MUSIC)
 ```
 
 `nix build` outputs only the `result` symlink (`result/bin/simulate`, ...);
@@ -50,7 +52,7 @@ For the baseline-restorer question (see "Baseline restorer in production"):
 
 ```
 result/bin/blkernel --label=run097 [--group=chN] [--slices=a,b --scoreout=f.root] \
-    [--sim=label:file.root ...] <sol files>                    # baseline memory kernel, data vs simulated restorers
+    [--sim=label:file.root ...] <sol files>                    # how long a pulse shifts later pulses, data vs simulated baselines
 result/bin/wavenoise [--nfiles=N] <run-70 sol files>          # per-sample ADC and trapezoid noise from the traces
 ```
 
@@ -72,10 +74,11 @@ subdirectories.
 `result/bin/simulate --name=value ...` overrides any `Config` field (see
 `include/Config.hpp`).
 
-**The defaults changed on 2026-10-12** from the long-window restorer (262 us,
-unconditional restart, width-derived noise) to the measured one (8.2 us,
-restart on return, 16 us low-pass, measured noise); see "Baseline restorer in
-production". The scripts whose documented results came from the old
+**The defaults changed on 2026-10-12** from the old long-window baseline
+(a 262 us average that restarts right after each trapezoid, noise from the
+pulse-height width) to the one that fits run 97 (an 8.2 us average that
+stays frozen until the trapezoid is back within 80 ADC, a 16 us smoothing,
+noise measured on traces); see "Baseline restorer in production". The scripts whose documented results came from the old
 defaults (`run_all.sh`, `extras.sh`, `tau_scan.sh`, `figures.sh`, and the
 first half of `tau_recovery.sh`) pass the old values explicitly as `$LEGACY`,
 so they reproduce the tables below. `kernel_study.sh`, `applicability.sh` and
@@ -117,11 +120,13 @@ board 66226. That board only served runs 0-5 with different filter settings
 | `trapDecay_us` | 20 | EnergyFilterPoleZeroT = 20000 ns on every long end (the 16 short ends are set to 10 us, the Grid to 200 us) |
 | `peakingDelay_ns` | 1500 | EnergyFilterPeakingPosition = 50 % of the flat top |
 | `peakingAvgSamples` | 16 | EnergyFilterPeakingAvg = MediumAVG = 16 samples (SOLARIS_DAQ `DigiParameters.h`) |
-| `baselineMeanSamples` | 1024 | EnergyFilterBaselineAvg = Medium = 1024 samples = 8.2 us at 8 ns; the 2740 PHA has no decimation (SOLARIS_DAQ `DigiParameters.h`: Fixed/VeryLow/Low/MediumLow/Medium/MediumHigh/High = 0/16/64/256/1024/4096/16384). Until 2026-10-12 the default was 32768 (262 us), the long-window stand-in that many results below were produced with; the measured baseline memory excludes it |
-| `baselineHoldoff_ns` | 7000 | DPP-PHA inhibits the baseline for the whole trapezoid (2 rise + flat) plus EnergyFilterBaselineGuardT = 0 |
-| `baselineRestartThrADC` / `baselineRestartHoldSamples` | 80 / 250 | Restart-on-return: after the holdoff the baseline stays frozen until the trapezoid is within this many ADC of it for this many consecutive samples (250 = 2 us). Fitted to the run-97 baseline memory and the ch-4 overshoot; 0 gives the documented unconditional restart |
-| `lfFilterOn` / `lfFilterTauUs` | on / 16.384 | One-pole low-pass on the baseline (a reading of EnergyFilterLFLimitation). The data allow at most ~16-32 us; 65 us or more is excluded |
-| `baselineDecimation` | 1 | Accumulator on a clock divided by N (the excluded ÷32 reading) |
+| `baselineMeanSamples` | 1024 | EnergyFilterBaselineAvg = Medium = 1024 samples = 8.2 us at 8 ns; the 2740 PHA has no decimation (SOLARIS_DAQ `DigiParameters.h`: Fixed/VeryLow/Low/MediumLow/Medium/MediumHigh/High = 0/16/64/256/1024/4096/16384). Until 2026-10-12 the default was 32768 (262 us), which many results below were produced with; run 97 rules it out ("Baseline restorer in production") |
+| `baselineHoldoff_ns` | 7000 | After each trigger the baseline stops averaging for the trapezoid length (2 rise + flat) plus EnergyFilterBaselineGuardT, which is 0 in every 37Cl run (confirmed by CAEN) |
+| `baselineRestartThrADC` / `baselineRestartHoldSamples` | 80 / 250 | After that, the baseline stays frozen until the trapezoid has stayed within this many ADC of it for this many samples in a row (250 = 2 us). This models what CAEN describes for EnergyFilterLFLimitation = On; 80 ADC / 2 us fits run 97 and the ch-4 overshoot runs. 0 starts averaging right after the freeze, as with LFLimitation = Off |
+| `baselineRefreeze` | off | On: the check is made once at the end of each freeze and, if the trapezoid is not back within `baselineRestartThrADC`, the baseline is frozen for another trapezoid length (CAEN's own description). Fits run 97 at 10-20 ADC up to 38 us, but holds the baseline too long beyond 80 us |
+| `baselineIdeal` | off | On: subtract the true baseline (the trapezoid of the ADC offset alone) instead of the restorer's, so earlier pulses never enter it. Used to test the correction without assuming what the restorer does |
+| `lfFilterOn` / `lfFilterTauUs` | on / 16.384 | A smoothing (one-pole low-pass) on the baseline. CAEN says the firmware has none; it is on only because it reproduces a small, unexplained effect of pulses 80-500 us earlier in run 97. 65 us or more is ruled out |
+| `baselineDecimation` | 1 | Baseline averaged on a clock divided by N (32 was an old reading, ruled out) |
 | `triggerHoldoff_ns` | 1000 | TimeFilterRetriggerGuardT = 0; the real kernels are populated from 1 us, so the time filter's re-arm is taken as 1 us |
 | `adcBits` / `adcOffset` | 16 / 32768 | ADC_Nbit = 16, DCOffset = 50 % (the task's 14 bit does not match the board) |
 | `beamPeakADC` | 1600 | long-end beam peak in Events_Run100_1_c000.root (L1 1583, L3 1644, L5 1691 ADC) |
@@ -142,7 +147,7 @@ Most of the ~700 energy units of per-sample noise lie above the trapezoid's
 band. The simulated trapezoid passes 0.0905 x a white per-sample noise, so
 the measured trapezoid noise corresponds to `--noiseSigmaADC_L=210
 --noiseSigmaADC_R=563`. This matters wherever a model compares the trapezoid
-with a threshold (the restart-on-return below); the width-derived 960 gives a
+with a threshold (the return check below); the width-derived 960 gives a
 trapezoid noise of ~87. The R value comes from run 70's R chain (the pre-swap
 preamp under a 10 us pole-zero).
 
@@ -155,8 +160,10 @@ preamp under a 10 us pole-zero).
   are skipped analytically. The trapezoid (a finite-impulse response of
   rise + rise + flat samples) and the baseline window are rebuilt from a
   warm-up before the next pulse. This is exact in distribution. The warm-up is
-  the filter and baseline memory plus `warmupMarginSamples` (default 0, only
-  defensive slack).
+  the filter and baseline window plus `warmupMarginSamples` (default 0, only
+  defensive slack). A baseline that waits for the trapezoid to return can
+  stay frozen longer than its window, so without the smoothing 500 us is
+  added.
 
 - Trigger holdoff: a particle inside 1 us of the previous accepted one gives
   no trigger. Its charge still lands in the accepted pulse. These merged
@@ -196,10 +203,10 @@ the residual enters directly. After that, the energy is the residual at the
 peaking point minus whatever the baseline window has averaged in. A baseline
 that averages the tail in would cancel most of it and flip the sign at large
 dt. The production data show no such sign change, so the profile follows the
-residual itself. The default reaches that with a 262 us window. The measured
-baseline memory shows that the hardware instead keeps the tail out of a
-short window: it restarts only once the trapezoid has returned to the
-baseline (see "Baseline restorer in production"). The energy-vs-dt profile
+residual itself. The old default reached that with a 262 us window. The
+hardware instead keeps the tail out of a short window: the baseline stays
+frozen until the trapezoid is back near the baseline, as CAEN confirms (see
+"Baseline restorer in production"). The energy-vs-dt profile
 is the same either way; quantities that depend on how long the baseline
 remembers a pulse (the rate correlation below, the bias in the next section,
 the reach of the kernel) are not.
@@ -221,12 +228,14 @@ Fitting a single exponential to the real profiles does not measure tau
 cleanly. Besides the pole-zero tail they carry a rate correlation: a hit with
 a long gap behind it sits in a quiet stretch. The long baseline average there
 is less depressed by pile-up. So the profile turns positive at large dt (long
-R runs -0.183 at 5-6 us through zero near 30 us to +0.014 at 38-60 us).
+R, relative to pulses whose previous pulse was 120-150 us earlier, runs
+-0.183 at 5-6 us through zero near 30 us to +0.014 at 38-60 us).
 `result/bin/realdt` scans the start of the fit and shows the resulting instability.
 Comparing the whole shape against the simulation is the meaningful test.
-(This explanation assumes the long baseline average. With the measured
-restorer, whose memory is mostly gone by ~100 us, the size of this rate
-correlation should be re-checked.)
+(This explanation assumes the old long baseline average. The baseline that
+fits run 97 forgets a pulse mostly within ~100 us. The +0.014 at 38-60 us
+matches in size the small effect of pulses 80-500 us earlier described in
+"Baseline restorer in production", whose cause is not known.)
 
 ## Does the fit return the decay time it was given?
 
@@ -312,12 +321,12 @@ bin width takes it to 99.8. On the L channel the same change gives
 95.4 -> 93.3. The trapezoid baseline is an average over a few hundred
 microseconds. Pulses beyond the 100 us the code keeps still move it.
 
-**With the measured restorer this no longer holds.** The premise is the
-262 us window. The real baseline's memory, measured from the run-97 hit
-stream, is ~0.003 of a pulse at 40-80 us, falls to ~0.0005 by 200 us and to
+**With the baseline that fits run 97 this no longer holds.** The premise is
+the 262 us window. How much an earlier pulse still shifts the energy,
+measured on the run-97 hit stream, is ~0.003 of a pulse at 40-80 us, falls to ~0.0005 by 200 us and to
 the noise beyond ~330 us, about a tenth of what a 262 us window gives.
 `scripts/kernel_study.sh` now runs with the current defaults (8.2 us window,
-restart on return at 80 ADC, 16 us low-pass, measured noise); the numbers
+frozen until within 80 ADC, 16 us smoothing, measured noise); the numbers
 below are in `output/kernel_study_meas/`:
 
 | correction, 40 kHz | params | R 192k hits | R 7.7k hits | L 192k hits | L 7.7k hits |
@@ -358,8 +367,7 @@ in `output/kernel_study_meas/kernel_study.log`.)
 
 A kernel per band of the earlier pulse's amplitude ([0, 0.5), ~1, ~2,
 >= 2.5 x the beam peak) would follow a shift that is not linear in that
-amplitude, e.g. a restart-on-return freeze that lasts longer after a bigger
-pulse. The amplitude mix is the same in the simulation and in run 97 (long
+amplitude, e.g. a baseline freeze that lasts longer after a bigger pulse. The amplitude mix is the same in the simulation and in run 97 (long
 ends: ~85 % at ~1x, ~13 % at ~2x, ~1.5 % at >= 2.5x, 1 % below 0.5x;
 `blkernel` and `kernelstudy` print it).
 
@@ -404,7 +412,8 @@ sqrt(corr^2 - floor^2), is 38 ADC against 36 before (58 against 54 at a
 30 us pole-zero, 84 against 80 at 80 kHz). The overshooting 8 us pole-zero
 is now the weakest case at low rate (4-9 % above the floor at 5-20 kHz).
 
-The long-window analysis below is kept for reference. It was written against
+The analysis below, made with the old 262 us baseline, is kept for
+reference. It was written against
 the earlier tooling (12 bins to 100 us); the pinned tooling has since made
 the reach change it proposes (30 bins to 316 us), so the tree-shape
 consequences below have already been taken.
@@ -455,7 +464,59 @@ read as the noise of the previous pulse's measured energy, but the
 noiseless predictor also reweights merged pile-up hits (see "Amplitude
 bands"), so it overstates the noise.
 
-## What the CAEN manual says
+## For the paper: the kernel under three readings of the baseline
+
+The fitted kernel needs only what is certain about the filter and the
+firmware: the trapezoid is linear, the energy is read at a fixed time after
+the trigger, and the baseline is an average of earlier trapezoid samples. How
+the baseline treats the tail (CAEN's return check, whose threshold is not
+documented) changes the kernel's shape but not its form, so the paper tests
+the correction under three readings of it instead of modelling it
+(`scripts/paper_sim.sh`; the draft is `doc/kernel_note.tex`, built with
+`cd doc && nix develop path:. -c latexmk -pdf kernel_note.tex`):
+
+- **never takes in the tail**: `--baselineIdeal=on` subtracts the true
+  baseline, what the trapezoid gives for the ADC offset alone;
+- **frozen until within 80 ADC for 2 us**: CAEN's description with a
+  threshold that reproduces the run-97 energy-vs-gap profile;
+- **averaging restarts after the 7 us freeze**: the baseline takes in as
+  much of the tail as it can.
+
+The first and last are the two extremes of how much tail the baseline can
+take in. Spread of non-pile-up pulses near the beam peak (ADC), 44 kHz,
+tau_R = 11 us, with the same `PulseHistory` code as the analysis:
+
+| baseline | R before | R after | R isolated | L before | L after | L isolated |
+|---|---|---|---|---|---|---|
+| never takes in the tail | 122.9 | 68.4 | 58.2 | 62.4 | 43.5 | 37.6 |
+| frozen until within 80 ADC | 127.2 | 77.4 | 65.9 | 62.6 | 49.0 | 39.3 |
+| restarts after the freeze | 117.7 | 80.7 | 65.7 | 50.3 | 43.2 | 39.3 |
+
+("isolated": the same at 0.5 kHz.) After correction every reading is within
+10-25 % of isolated pulses; the excess left is similar in all three, so it is
+a limit of the kernel itself, not of the baseline. The kernel explains 0.64,
+0.59 and 0.51 of the long-R variance; on run 97, at the same rate, 0.65.
+
+One reading of CAEN's description defeats the correction: a single-sample
+check once per trapezoid length at 20 ADC (`--baselineRefreeze=on`) keeps
+the baseline stuck for hundreds of us; R only falls from 191 to 165 ADC and
+the kernel explains 0.27 of the variance. Run 97 rules it out.
+
+`result/bin/notefigures` draws the note's figures from the analyze logs and
+the 37Cl pipeline log (the run-97 kernels), as PDF (`doc/figs`) and PNG
+(`doc/figs/png`). It prints its PDFs with ROOT's "Portrait" option:
+`PlottingUtils::SaveFigure` puts a side-legend canvas, much wider than tall,
+on a rotated page. `scripts/run97_figure.sh` makes the run-97 before/after
+figure by running `PulseHistory` with the 37Cl configuration from `~/MUSIC`.
+
+Only the small files these need are kept in `output/`:
+`paper_sim/analysis.log` (the study's spreads), the two applicability
+`grid.txt` tables and `kernel_study_meas/kernel_study.log` (numbers quoted
+above). Everything else there is regenerated by the scripts.
+
+## What CAEN says
+
+### The manuals
 
 UM7788 rev. 9, x2740 FELib PHA Parameters:
 
@@ -467,69 +528,51 @@ UM7788 rev. 9, x2740 FELib PHA Parameters:
   1 / 4 / 16 / 64 samples.
 
 - `EnergyFilterBaselineGuardT`: "freeze the baseline calculation beyond the
-  trapezoid end". The baseline is frozen through the trapezoid and the guard
-  (0 in 37Cl) only extends the freeze. This is the model implemented.
+  trapezoid end". It is a time in ns (0-8000 in steps of 8, in the firmware's
+  own parameter list and in SOLARIS_DAQ `DigiParameters.h`), not an on/off
+  switch. It is 0 on all 64 channels in every board-66222 run (6-137),
+  including all of production (97-137).
 
 - `EnergyFilterLFLimitation`: "Allows to enable a low-frequency filter for
-  the energy filter". Nothing else: no time constant, no statement of what it
-  acts on. It is On in every 37Cl channel and Off in the SOLARIS_DAQ
-  defaults. The x725/x730 register manual (UM5678, reg 0x1nA0 bit 29)
-  describes the same single bit as "optimization of the Baseline Restorer to
-  avoid tails in the energy peaks".
+  the energy filter", and nothing more. It is On in every 37Cl channel and Off
+  in the SOLARIS_DAQ defaults. The x725/x730 register manual (UM5678, reg
+  0x1nA0 bit 29) describes the same bit as "optimization of the Baseline
+  Restorer to avoid tails in the energy peaks".
 
 - The event flags carry an "Energy filter baseline freeze" bit (0x3). Hits
   acquired while the baseline was frozen are identifiable in the raw data.
 
-The real long-R kernel decays slower than the 1024-sample model allows and
-never changes sign. That is the behaviour of a restorer that does not follow
-the undershoot on the 10 us scale.
+UM5960 sec. 4.2.4 (CoMPASS) describes the baseline as the average of a set
+number of trapezoid samples before the trapezoid, frozen while the trapezoid
+lasts: "once the trapezoid is returned to the baseline, the averaging
+restarts to run". UM5960 and the CoMPASS QuickStart GD6300 (rev. 27) do not
+mention the LF limitation.
 
-`scripts/tau_scan.sh` runs tau_R = 8-16 us with the High (16384-sample)
-baseline for comparison with the real kernel:
+The firmware image does not explain the LF limitation either (the
+parameter-to-register mapping is in the FPGA gateware; see the local
+`FIRMWARE_GUIDE.md`).
 
-| dt bin | real R (run 97) | tau_R 8 | tau_R 10 | tau_R 12 | tau_R 14 |
-|---|---|---|---|---|---|
-| 6 us | -0.119 | -0.182 | -0.130 | -0.091 | -0.061 |
-| 8 us | -0.099 | -0.124 | -0.093 | -0.068 | -0.047 |
-| 12 us | -0.074 | -0.073 | -0.061 | -0.048 | -0.034 |
-| 18 us | -0.046 | -0.033 | -0.033 | -0.028 | -0.021 |
-| 26 us | -0.021 | -0.005 | -0.009 | -0.010 | -0.009 |
+### Support ticket (October 2026)
 
-The real kernel is bracketed by tau_R = 10 and 12 us in amplitude. It decays
-somewhat slower than either. So with a non-tracking baseline the 37Cl data
-point to a R preamp decay time of roughly 11-12 us, not 20 us.
+We asked CAEN support what the baseline does after a pulse on this firmware
+(V2740, CUP 2025102402, FPGA 1.0.112), and what `EnergyFilterLFLimitation`
+does. The answers:
 
-That scan used the High baseline at 40 kHz. Repeated against the run-97 R
-profile at the measured 44 kHz, with the measured noise and the two
-restorers that fit the baseline memory (deviation from the 38-60 us level;
-rms over the six bands):
+- After each trigger the baseline is frozen for rise + flat + rise (7 us
+  here), plus `EnergyFilterBaselineGuardT`, and then averaging starts again
+  (first reply, which did not mention the LF limitation).
+- With `EnergyFilterLFLimitation` On, the baseline stays frozen for about one
+  trapezoid length. The firmware then checks whether the signal has come back
+  close to the baseline. If it has not, the baseline is frozen for about
+  another trapezoid length, and so on. A correctly pole-zero-compensated
+  signal is back by the first check, so the repeat only happens when the
+  pole-zero is wrong.
+- There is no low-pass filter. The running average is the only filtering of
+  the baseline.
 
-| model | tau_R 9 | 10 | **11** | 12 | 13 | 14 |
-|---|---|---|---|---|---|---|
-| restart at 80 ADC + LF 16 us | 0.029 | 0.016 | **0.006** | 0.019 | 0.036 | 0.053 |
-| fixed 27 us freeze + LF 16 us | 0.030 | 0.018 | **0.007** | 0.018 | 0.034 | 0.050 |
-| High 16384, freeze 7 us (old) | 0.020 | 0.010 | 0.014 | 0.028 | 0.042 | 0.056 |
-
-At tau_R = 11 us the restart model gives -0.203 / -0.177 / -0.136 / -0.086 /
--0.044 / -0.012 against the data's -0.197 / -0.184 / -0.142 / -0.087 /
--0.037 / -0.006. **tau_R = 11 us** does not depend on the restorer model.
-The High model's profile is similar, but its baseline memory is excluded
-(below).
-
-CoMPASS User Manual UM5960 rev. 27 and the CoMPASS QuickStart GD6300 rev. 27
-(Feb 2026) do not mention the LF limitation at all. The checkbox is absent
-from their Energy tab description.
-
-UM5960 sec. 4.2.4 describes the restorer as implemented here: the baseline
-is the average of a programmable number of trapezoid-output points before the
-trapezoid, frozen for the trapezoid duration, and "once the trapezoid is
-returned to the baseline, the averaging restarts to run".
-
-So the three CAEN documents together fix everything in the model except the
-LF filter, which none of them explains. The firmware image does not either
-(the parameter-to-register mapping is in the FPGA gateware; see the local
-`FIRMWARE_GUIDE.md`). A question to CAEN and a bench procedure
-(`doc/V2740_BENCH_TEST.md`) are prepared.
+CAEN did not say how close "close to the baseline" is, or whether the check
+looks at one sample or several. "Baseline restorer in production" below
+compares this with run 97.
 
 ## What the real data say
 
@@ -537,7 +580,8 @@ Run 70 waveforms, hit streams of runs 72-97.
 
 Run 70 saved a 32 us waveform for every event (ADC input and trapezoid
 output probes). `result/bin/realwave` averages the traces of 230k isolated
-beam-like pulses on the long ends and fits the preamp decay directly:
+pulses near the beam peak on the long ends and fits the preamp decay
+directly:
 
 | | tau from ADC input | trapezoid tail (pole-zero at run 70) |
 |---|---|---|
@@ -547,8 +591,8 @@ beam-like pulses on the long ends and fits the preamp decay directly:
 At run 70 both preamps had a ~19-20 us decay time.
 
 `result/bin/realdt` then follows the energy-vs-dt profile of each strip group
-through the hit streams (no waveforms needed), relative to its 38-60 us
-level:
+through the hit streams (no waveforms needed), relative to pulses whose
+previous pulse was 120-150 us earlier:
 
 | run | R long pole-zero | R long excess at 8-12 us | R/L peak |
 |---|---|---|---|
@@ -565,9 +609,8 @@ The L short ends went the other way at run 89 (pole-zero 20 -> 10 us on a
 20 us preamp) and show the corresponding excess.
 
 The simulation reproduces all three R configurations with tau_R = 19 us before
-run 74 and 11 us after, a non-tracking baseline (High), and nothing else
-changed (table in the session summary; sim files
-`output/realdt/sim_run*like.root`).
+run 74 and 11 us after, a baseline that does not follow the undershoot
+(High), and nothing else changed (sim files `output/realdt/sim_run*like.root`).
 
 Two consequences for the 37Cl analysis:
 
@@ -579,95 +622,155 @@ Two consequences for the 37Cl analysis:
    that configuration (flat top decays). That is part of the R/L gain
    difference.
 
+
+### R preamp decay time
+
+The run-97 R kernel (what `PulseHistory` measures) falls more slowly than a
+baseline that starts averaging again right after the 7 us freeze allows, and
+it never changes sign. `scripts/tau_scan.sh` simulates tau_R = 8-16 us with
+the High (16384-sample) baseline, which does not follow the undershoot
+either, and compares:
+
+| dt bin | real R (run 97) | tau_R 8 | tau_R 10 | tau_R 12 | tau_R 14 |
+|---|---|---|---|---|---|
+| 6 us | -0.119 | -0.182 | -0.130 | -0.091 | -0.061 |
+| 8 us | -0.099 | -0.124 | -0.093 | -0.068 | -0.047 |
+| 12 us | -0.074 | -0.073 | -0.061 | -0.048 | -0.034 |
+| 18 us | -0.046 | -0.033 | -0.033 | -0.028 | -0.021 |
+| 26 us | -0.021 | -0.005 | -0.009 | -0.010 | -0.009 |
+
+The real kernel lies between tau_R = 10 and 12 us in size, and falls
+somewhat more slowly than either. So the R preamp decays in roughly 11-12 us,
+not 20 us.
+
+That scan used 40 kHz. Repeated at the measured 44 kHz with the measured
+noise, as the rms difference from run 97 over the six gap bands from 5 to
+38 us (each band measured relative to pulses whose previous pulse was
+38-60 us earlier):
+
+| model | tau_R 9 | 10 | **11** | 12 | 13 | 14 |
+|---|---|---|---|---|---|---|
+| wait for return (80 ADC) + 16 us smoothing | 0.029 | 0.016 | **0.006** | 0.019 | 0.036 | 0.053 |
+| fixed 27 us freeze + 16 us smoothing | 0.030 | 0.018 | **0.007** | 0.018 | 0.034 | 0.050 |
+| High 16384, freeze 7 us | 0.020 | 0.010 | 0.014 | 0.028 | 0.042 | 0.056 |
+
+At tau_R = 11 us the first model gives -0.203 / -0.177 / -0.136 / -0.086 /
+-0.044 / -0.012 against the data's -0.197 / -0.184 / -0.142 / -0.087 /
+-0.037 / -0.006. **tau_R = 11 us** whichever model is used. The High
+model's profile is similar, but it remembers a pulse far too long (below).
+
 ### Baseline restorer in production (runs 91+)
 
-No waveform run has a Medium restorer on a mismatched channel. Runs 37-41
-and 70 all have Medium only on the matched L ends and High on R. And the LF
-limitation is On in every run. So neither can be tested in isolation.
+No waveform run has a Medium baseline on a mismatched channel. Runs 37-41
+and 70 have Medium only on the matched L ends and High on R, and the LF
+limitation is On in every run. So the question is answered from the
+production hit streams.
 
-The production hit streams settle the practical question instead.
-R long ends, deviation from the 38-60 us level, run-97 configuration
-(tau_R = 11 us, pole-zero 20 us, simulated at 27 kHz; run 97 actually runs at
-44 kHz per R long channel, `SelfTrgRate` = 46205):
+**Pulse height against the gap to the previous pulse.** R long ends, run 97
+(`realdt`, first 30 M hits), in percent of the beam peak, relative to pulses
+whose previous pulse was 120-150 us earlier. By then the earlier pulse no
+longer matters: in the simulation that level is within 0.1 % of a pulse with
+no earlier pulse at all. The simulations run at the run-97 rate (44 kHz),
+tau_R = 11 us and the measured noise, 400k events each:
 
-| | 5-6 | 6-8 | 8-12 | 12-18 | 18-26 | 26-38 us |
-|---|---|---|---|---|---|---|
-| real run 97 | -0.197 | -0.184 | -0.142 | -0.087 | -0.037 | -0.006 |
-| sim, Medium 1024 samples | -0.134 | -0.114 | -0.039 | +0.048 | +0.038 | +0.013 |
-| sim, MediumHigh 4096 | -0.160 | -0.139 | -0.095 | -0.039 | 0.000 | +0.021 |
-| sim, High 16384 | -0.177 | -0.156 | -0.117 | -0.071 | -0.032 | -0.010 |
+| gap [us] | 5-6 | 6-8 | 8-12 | 12-18 | 18-26 | 26-38 | 38-60 | 60-90 | 90-120 | rms |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **run 97** | -18.3 | -17.0 | -12.9 | -7.4 | -2.4 | +0.8 | +1.4 | +0.6 | +0.1 | |
+| averaging starts again right after the 7 us freeze | -12.0 | -9.6 | -2.3 | +6.0 | +4.9 | +2.0 | +0.6 | +0.1 | +0.0 | 7.0 |
+| CAEN's description, one check per trapezoid length, 10 ADC | -18.8 | -16.2 | -12.1 | -7.0 | -3.2 | -0.7 | +0.3 | +0.7 | +0.4 | 0.8 |
+| same, 20 ADC | -18.4 | -15.8 | -11.4 | -6.1 | -2.3 | -0.2 | +0.5 | +0.6 | +0.4 | 0.9 |
+| same, 40 ADC | -17.9 | -15.3 | -10.7 | -5.1 | -1.7 | -0.0 | +0.1 | +0.2 | -0.1 | 1.3 |
+| frozen until within 80 ADC for 2 us | -18.5 | -15.9 | -11.9 | -7.0 | -2.5 | +0.6 | +0.7 | +0.3 | +0.3 | 0.6 |
+| same + 16 us smoothing (the default) | -18.5 | -15.9 | -11.9 | -7.0 | -2.8 | +0.3 | +1.4 | +0.7 | +0.2 | 0.6 |
 
-A restorer that averages 1024 trapezoid samples, frozen only for the 7 us
-trapezoid, would turn the deficit into an excess beyond 12 us. The data show
-no such sign change. They need a baseline that does not average in the
-undershoot. A long average (16384 samples, or 262 us) does that, and so does a
-short one that is kept frozen until the tail has gone. The profile cannot tell
-the two apart: subtracting the 38-60 us level removes exactly the constant
-offset in which the length of the baseline's memory shows up.
+(rms: difference from run 97 over the nine bands, in percent. The statistical
+error on each simulated band is 0.2-0.5 %.)
 
-**The baseline's memory, measured.** `result/bin/blkernel` regresses the
-energy of each isolated hit (dtPrev > 40 us, dtNext > 10 us) on the summed
-amplitude of the earlier hits on the same channel, in bins of their age,
-within channel. A boxcar baseline gives a flat kernel with an edge at its
-length, a low-pass an exponential. The R undershoot and the L overshoot give
-opposite signs, so the L long ends control for rate artefacts. Run 97, R long
-ends, 2.0 M isolated hits, kernel per earlier beam-peak hit:
+Why the first row reads high from 12 us on: a pulse that follows another sits
+on its undershoot, which makes it read low. But if the baseline starts
+averaging again right after the freeze, it takes in the undershoot of the
+last 8 us, which was deeper than the undershoot still under the pulse, and
+subtracting that makes the pulse read high. While the undershoot is
+recovering the second effect wins. Run 97 reads low at every gap, so its
+baseline does not follow the undershoot. That is what CAEN describes for
+`EnergyFilterLFLimitation` On: the baseline stays frozen until the trapezoid
+is back close to the baseline. Every model that waits for that comes close
+(rms 0.6-1.3 %, against 7 %). CAEN's own version (one check per trapezoid
+length) fits best with a threshold of 10-20 ADC on a single sample; the
+simulation's default rule, 80 ADC held for 2 us, fits as well. How strict the real check is
+cannot be told apart from these data.
+
+Even the largest guard time the firmware allows (`BaselineGuardT` = 8 us, a
+15 us freeze) would not explain run 97: with it the pulse still reads high
+beyond about 18 us.
+
+**How long a pulse is remembered.** `result/bin/blkernel` takes the pulses
+with no other pulse within 40 us before or 10 us after, and measures how much
+each earlier pulse on the same channel shifts their energy, by how long before
+it came. The values are the shift per earlier pulse of beam-peak size, as a
+fraction of the beam peak (run 97, 2.0 M pulses on the eight R long ends; the
+L long ends, whose pole-zero error has the opposite sign, are the control):
 
 | age [us] | 40-80 | 80-130 | 130-200 | 200-260 | 260-330 | 330-450 |
 |---|---|---|---|---|---|---|
-| data | +0.0030 | +0.0009 | +0.0005 | +0.0003 | +0.0004 | +0.0001 |
-| 262 us window, freeze 7 us | +0.0030 | +0.0039 | +0.0038 | +0.0039 | +0.0038 | +0.0010 |
-| 1024 + 131 us low-pass, freeze 7 us | +0.0053 | +0.0045 | +0.0031 | +0.0023 | +0.0016 | +0.0009 |
-| 1024, restart at 80 ADC + 16 us low-pass | +0.0021 | +0.0008 | +0.0005 | +0.0002 | +0.0001 | +0.0001 |
+| run 97, R | +0.0030 | +0.0009 | +0.0005 | +0.0003 | +0.0004 | +0.0001 |
+| run 97, L | -0.0008 | -0.0004 | -0.0001 | -0.0001 | +0.0001 | +0.0003 |
+| averaging starts again right after the 7 us freeze | +0.0013 | +0.0000 | -0.0000 | +0.0001 | -0.0000 | -0.0000 |
+| CAEN's description, 10 ADC | +0.0039 | +0.0050 | +0.0046 | +0.0043 | +0.0035 | +0.0034 |
+| CAEN's description, 20 ADC | +0.0052 | +0.0059 | +0.0052 | +0.0049 | +0.0038 | +0.0037 |
+| frozen until within 80 ADC for 2 us | +0.0014 | +0.0001 | -0.0001 | +0.0001 | +0.0000 | +0.0000 |
+| same + 16 us smoothing (the default) | +0.0020 | +0.0007 | +0.0005 | +0.0002 | -0.0000 | +0.0002 |
 
-(The first bin includes the previous pulse's own pole-zero tail.)
-
-Joint chi2 per bin over R and L, all / low-rate / high-rate slices (48 bins,
-0.0002 systematic per bin), at 44 kHz with the measured noise:
-
-| restorer | chi2/48 | profile rms |
-|---|---|---|
-| 1024, frozen 7 us (documented) | 4.6 | 0.091 |
-| 1024, fixed 27 us freeze | 4.1 | 0.006 |
-| 1024, restart at 40-80 ADC, 2 us hold | 4.0-4.1 | 0.005-0.008 |
-| **1024, restart at 80 ADC + 16 us low-pass** | **2.5** | 0.006 |
-| 1024, fixed 27 us freeze + 16 us low-pass | 2.1 | 0.007 |
-| any low-pass >= 65 us | 11-30 | 0.006 |
-
-On ch 4, runs 25-29 (High window, 10 us pole-zero on the ~19 us preamp, so an
-overshoot, at 27 kHz), the kernel beyond 80 us (-0.0016 falling to -0.0002 at
-450-650 us) is fitted by the same restart at ~80 ADC. A fixed 27 us freeze has
-the wrong shape there, and the documented 7 us freeze is 5-10x too large.
-Runs 13-24 (Medium on ch 4) show no memory beyond 80 us, where a ÷32
-accumulator would leave a 262 us plateau.
+(Simulated errors are about 0.0001 per bin. The 40-80 us bin includes the
+previous pulse's own undershoot.)
 
 So:
 
-- **A 262 us window (Medium counted on a ÷32 clock) and any baseline memory
-  of ~100 us or more are excluded.** The firmware agrees: the 2740 PHA has no
+- In run 97 a pulse 80-500 us earlier still shifts the energy, by +0.09 % of
+  the beam peak per pulse at 80-130 us, falling to +0.01 % by 330-450 us.
+  Added over all earlier pulses at 44 kHz this is about a +1 % shift, which
+  is the +1.4 % at 38-60 us in the first table.
+- No model without the smoothing reproduces this. Waiting for the trapezoid
+  to return gives nothing beyond 80 us. CAEN's version with one check per
+  trapezoid length keeps the baseline frozen for hundreds of us and gives
+  5-10 times too much. The 16 us smoothing roughly reproduces it, but CAEN
+  says the firmware has no such filter. **The cause of this small effect is
+  not known.** The L control shows a smaller effect (a quarter to a half of
+  the size) with the opposite sign at 40-130 us, so it is at least partly
+  tied to the R chain rather than to the beam rate. A slow second decay
+  component in the R preamp is one possibility. It has not been measured: the
+  R preamp fitted at run 74 has never been recorded with waveforms.
+- Long averaging windows are ruled out: a 262 us window (Medium counted on a
+  ÷32 clock), or any smoothing of 65 us or more, predicts four to ten times
+  the run-97 effect at 80-330 us. The firmware agrees: the 2740 PHA has no
   decimation, and its largest window (High) is 131 us.
-- The data fit the documented 1024-sample (8.2 us) window **plus a restart that
-  waits until the trapezoid is back within ~80 ADC of the baseline**
-  (UM5960: "once the trapezoid is returned to the baseline, the averaging
-  restarts"), with at most a short (~16 us) low-pass. That fits both the
-  run-97 undershoot and the ch 4 overshoot. LFLimitation ("optimization of the
-  Baseline Restorer to avoid tails") is the natural candidate. No physics run
-  has it Off, so this needs CAEN or the bench test to confirm.
-- A restart on return is not linear in the pulse heights (a larger tail
-  keeps the baseline frozen longer). The `PulseHistory` kernel, which is
-  linear in the earlier heights, is then exact only for pulses near the beam
-  peak it is fitted on.
-- Not resolved: the ch 4 40-80 us bin (wrong sign in every long-freeze model;
-  it depends on the inferred 19 us decay) and how much of the weak R tail at
-  80-330 us is the low-pass versus rate artefacts (it is about 2x the L
-  control).
+- Waiting for the trapezoid to return is not linear in pulse height: a bigger
+  pulse leaves a bigger undershoot, which keeps the baseline frozen longer.
+  The `PulseHistory` correction, which is linear in the earlier pulse heights,
+  is fitted on pulses near the beam peak and is exact only for pulses of that
+  size.
+- On ch 4 in runs 25-29 (High window, a 10 us pole-zero on the ~19 us
+  preamp, so an overshoot, at 27 kHz) the default model also fits the effect
+  beyond 80 us (-0.0016 falling to -0.0002 at 450-650 us), while averaging
+  again right after the freeze gives 5-10 times too much. Runs 13-24 (Medium
+  on ch 4) show no effect beyond 80 us, where a ÷32 clock would leave a
+  262 us plateau.
 
-Figures: `output/baseline_test/baseline_kernel_run097.png`,
-`baseline_kernel_ch4_High_runs25-29.png`, `baseline_profiles_44kHz.png`,
-`caen_baseline_kernel.png` (the CAEN attachment).
+**Simulation defaults.** The default stays "frozen until within 80 ADC for
+2 us, plus a 16 us smoothing", because it is the closest to run 97 in both
+tables. The smoothing is there only to stand in for the unexplained effect
+above. For the firmware as CAEN describes it, use
+`--lfFilterOn=off --baselineRefreeze=on --baselineRestartThrADC=20` (add
+`--rate_kHz=44 --tauR_us=11` for run 97). A baseline that waits for the
+trapezoid can stay frozen longer than its window, so without the smoothing
+the simulation rebuilds the baseline from 500 us before each pulse that
+follows a quiet stretch (with only the usual ~15 us it released the freeze
+too early). The older long-window defaults give the same energy-vs-gap
+profile but remember a pulse far too long; results that depended on that have
+been redone (tau recovery, kernel reach, applicability grid) or are marked as
+long-window results.
 
-**These are now the simulation defaults** (add `--rate_kHz=44` for run 97).
-The old long-window defaults give the same energy-vs-dt profile but the wrong
-baseline memory. The results that depend on it have been redone (tau
-recovery, kernel reach, applicability grid; `doc/polezero.tex` updated) or
-are marked as long-window results.
+**For the analysis** none of this changes the correction: `PulseHistory` fits
+its kernel from the data (30 bins out to 316 us). The ~1 % overall shift is
+the same for every pulse at a given rate and goes into the calibration.
+

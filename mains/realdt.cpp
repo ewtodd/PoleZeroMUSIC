@@ -1,8 +1,9 @@
 // Energy-vs-dt profiles per strip group from a SOL hit stream (no traces
 // needed): long L, long R, short L, short R. Energies are normalised to the
-// channel's beam peak and the deviation is reported relative to the 38-60 us
-// level, which maps the sign and size of the pulse-history effect onto the
-// (preamp tau, pole-zero) combination of each group.
+// channel's beam peak and the deviation is reported relative to pulses whose
+// previous pulse was 120-150 us earlier, which maps the sign and size of the
+// pulse-history effect onto the (preamp tau, pole-zero) combination of each
+// group.
 //
 //   realdt --label=run084 --out=output/realdt <sol file>
 #include "BinaryUtils.hpp"

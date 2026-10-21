@@ -3,12 +3,14 @@
 
 BaselineRestorer::BaselineRestorer(Int_t meanSamples, Bool_t lfOn,
                                    Double_t lfTauNs, Double_t samplePeriodNs,
-                                   Double_t restartThr, Int_t restartHold)
+                                   Double_t restartThr, Int_t restartHold,
+                                   Int_t refreezeSamples)
     : window_(meanSamples > 0 ? meanSamples : 1, 0.0), pos_(0), count_(0),
       sum_(0.0), frozenUntil_(-1), lfOn_(lfOn && lfTauNs > 0.0),
       lfAlpha_(lfOn_ ? samplePeriodNs / (samplePeriodNs + lfTauNs) : 0.0),
       lfState_(0.0), restartThr_(restartThr), awaitingReturn_(kFALSE),
-      restartHold_(restartHold > 0 ? restartHold : 1), inBand_(0) {}
+      restartHold_(restartHold > 0 ? restartHold : 1), inBand_(0),
+      refreezeSamples_(refreezeSamples > 0 ? refreezeSamples : 0) {}
 
 void BaselineRestorer::Update(Long64_t n, Double_t trapezoid) {
   if (n < frozenUntil_)
@@ -16,6 +18,13 @@ void BaselineRestorer::Update(Long64_t n, Double_t trapezoid) {
   // No baseline exists yet to return to.
   if (awaitingReturn_ && count_ == 0)
     awaitingReturn_ = kFALSE;
+  if (awaitingReturn_ && refreezeSamples_ > 0) {
+    if (TMath::Abs(trapezoid - Value()) > restartThr_) {
+      frozenUntil_ = n + refreezeSamples_;
+      return;
+    }
+    awaitingReturn_ = kFALSE;
+  }
   if (awaitingReturn_) {
     if (TMath::Abs(trapezoid - Value()) > restartThr_) {
       inBand_ = 0;
