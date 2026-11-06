@@ -1,0 +1,28 @@
+
+# Build artifacts of the `nix develop` + make fallback
+bin/
+build/
+
+# `nix build` symlink
+result
+result-*
+
+# Simulation results and run logs
+output/
+
+# Generated figures
+doc/figs/
+
+# Root CTFE / ACLiC generated artifacts
+*_C.so
+*_C.d
+*_C_ACLiC_dict_rdict.pcm
+*_cpp.so
+*_cpp.d
+*_cpp_ACLiC_dict_rdict.pcm
+AutoDict_*
+
+# Accidental editor/stray files
+:q
+
+
