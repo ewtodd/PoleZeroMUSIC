@@ -17,6 +17,8 @@ public:
   TrapezoidFilter(Int_t riseSamples, Int_t flatSamples,
                   Double_t samplePeriod_ns, Double_t tauSet_ns);
   Double_t Process(Double_t v);
+  void Reset();
+  Int_t Length() const { return k_ + l_; }
 
 private:
   Int_t k_;

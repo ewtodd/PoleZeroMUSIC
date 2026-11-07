@@ -4,6 +4,12 @@
     nixpkgs.follows = "utils/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
     utils.url = "github:ewtodd/Analysis-Utilities";
+    # The MUSIC monorepo, pinned. Only its tooling PulseHistory and Constants
+    # are compiled into the figures binary; nothing there is edited.
+    music = {
+      url = "github:ewtodd/MUSIC";
+      inputs.nixpkgs.follows = "utils/nixpkgs";
+    };
   };
   outputs =
     {
@@ -11,6 +17,7 @@
       nixpkgs,
       flake-utils,
       utils,
+      music,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -22,6 +29,7 @@
         # CPU build of the library and the matching ROOT it was built against.
         analysis-utils = utils.packages.${system}.default;
         root = utils.packages.${system}.root;
+        musicTooling = "${music.outPath}/tooling";
 
         # Keep simulation output and build artifacts out of the store copy.
         src = lib.cleanSourceWith {
@@ -34,6 +42,7 @@
             in
             !(lib.elem top [
               "output"
+              "doc"
               "bin"
               "build"
             ])
@@ -56,6 +65,8 @@
             root
             pkgs.bash
           ];
+
+          MUSIC_TOOLING = toString musicTooling;
 
           dontConfigure = true;
           buildPhase = ''
@@ -85,8 +96,10 @@
           ];
           shellHook = ''
             echo "Analysis-Utilities version: ${analysis-utils.version}"
-            export CPLUS_INCLUDE_PATH="$PWD/include''${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
-            export ROOT_INCLUDE_PATH="$PWD/include''${ROOT_INCLUDE_PATH:+:$ROOT_INCLUDE_PATH}"
+            export MUSIC_TOOLING="''${MUSIC_TOOLING:-${musicTooling}}"
+            echo "MUSIC tooling: $MUSIC_TOOLING"
+            export CPLUS_INCLUDE_PATH="$PWD/include:$MUSIC_TOOLING/include''${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+            export ROOT_INCLUDE_PATH="$PWD/include:$MUSIC_TOOLING/include''${ROOT_INCLUDE_PATH:+:$ROOT_INCLUDE_PATH}"
             alias clean-aclic='rm -f *_C.so *_C.d *_C_ACLiC_dict_rdict.pcm *_cpp.so *_cpp.d *_cpp_ACLiC_dict_rdict.pcm AutoDict_*'
           '';
         };

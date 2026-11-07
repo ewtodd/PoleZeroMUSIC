@@ -1,23 +1,34 @@
 # MUSIC pole-zero figures
 
-`figures` draws the figures of `doc/kernel_note.tex` and the two-pulse baseline
-figure. Four are simulated filter responses; the other three read the outputs
-of the 37Cl analysis.
+`figures` draws the figures and the spread table of the pole-zero paper: the
+filter responses, the two-pulse baseline figure, the rate-dependent
+pulse-height spectra and the run-97 results. `simulate` makes the hits the
+spectra read. The inputs are simulated filter responses, simulated hits, and
+the outputs of the 37Cl analysis.
 
 ## Build and run
 
 ```
-nix build                       # -> result/bin/figures
-./result/bin/figures            # PDFs in doc/figs, PNGs in doc/figs/png
-bash scripts/copy_figures.sh    # copy doc/figs/*.pdf into the paper
+nix build                       # -> result/bin/{figures,simulate}
+bash scripts/spectra_inputs.sh  # regenerate the 1/40 kHz spectra inputs
+./result/bin/figures            # PDFs and the table in doc/figs, PNGs in doc/figs/png
+bash scripts/copy_figures.sh    # copy the PDFs and the table into the paper
 ```
 
-Inside `nix develop`, `make -j` builds the same binary in `bin/`.
+Inside `nix develop`, `make -j` builds the same binaries in `bin/`. The
+unmodified MUSIC `PulseHistory` and `Constants` are compiled from the pinned
+`music` flake input. To build against a local checkout, use
+`nix build --override-input music git+file://$HOME/MUSIC --no-write-lock-file`
+(a `path:` input would copy the whole checkout into the store).
+`src/SimDatasetConfig.cpp` follows the pinned tooling, so a newer checkout may
+need it updated first.
 
 ```
 figures [--log=<pipeline_fused.log>] [--run=run97_c000]
         [--sim=<analysis.log>[,<analysis.log>...]]
-        [--run97=<deviation.root>] [--out=doc/figs] [--format=pdf|png]
+        [--run97=<deviation.root>]
+        [--long1=<long_1kHz.root>] [--long40=<long_40kHz.root>]
+        [--out=doc/figs] [--format=pdf|png]
 ```
 
 With no arguments it reads
@@ -25,12 +36,18 @@ With no arguments it reads
 | Option | Default | Contains |
 |---|---|---|
 | `--log` | `~/MUSIC/analysis/37Cl/pipeline_fused.log` | the `kernel:` lines of the 37Cl pipeline |
-| `--sim` | `output/paper_sim/analysis.log` | `analyze` logs, one per baseline reading |
+| `--sim` | `output/paper_sim/analysis.log` | the spreads of the three baseline readings |
 | `--run97` | `output/run97/deviation.root` | run 97's `before_long_right` and `after_long_right` profiles |
+| `--long1` | `output/figures/long_1kHz.root` | the 1 kHz simulated hits, left matched, right mismatched |
+| `--long40` | `output/figures/long_40kHz.root` | the 40 kHz simulated hits, left matched, right mismatched |
 
 A figure whose input is missing is skipped, so the previous file is left in
 place. `--format` writes one format straight into `--out`; the default writes
 both, with the PNGs moved to `<out>/png/`.
+
+`analysis.log` was written by the `analyze` program, which is no longer in this
+repository, and `output/` is gitignored, so keep that file: it cannot be
+regenerated from here.
 
 ## Figures
 
@@ -40,20 +57,29 @@ both, with the PNGs moved to `<out>/png/`.
 | `polezero` | matched, under- and over-compensated tails |
 | `single` | one right-chain pulse with the 37Cl settings |
 | `pileup_pair` | a second pulse inside the baseline freeze, with the loss at its read point |
+| `spectrum_1kHz` / `spectrum_40kHz` | raw pulse-height spectra at the two rates, matched left against mismatched right |
+| `spectrum_1kHz_corrected` / `spectrum_40kHz_corrected` | the same spectra after the PulseHistory correction |
 | `kernel_run97` | the long-left, long-right and short-left kernels fitted on run 97 |
-| `sim_R` / `sim_L` | corrected and raw spread against rate for the three baseline readings |
+| `spread_table.tex` | a tabular, not a figure: rms spread before and after correction at 10, 44 and 80 kHz for the three baseline readings, for the paper to `\input` (needs `siunitx` and `booktabs`) |
 | `run97_deviation_R` | run 97 long-right profile before and after correction |
 
-The simulated figures use unit-amplitude pulses, so their vertical scales are
-in arbitrary units. They use the DPP-PHA settings of the 37Cl runs 97-137
-(board 66222): 8 ns samples, 2 us rise, 3 us flat top, 20 us pole-zero, 50 %
-peaking, 7 us baseline holdoff. They are constants at the top of
-`mains/figures.cpp`.
+The filter-response figures use unit-amplitude pulses, so their vertical
+scales are in arbitrary units. They use the DPP-PHA settings of the 37Cl runs
+97-137 (board 66222): 8 ns samples, 2 us rise, 3 us flat top, 20 us pole-zero,
+50 % peaking, 7 us baseline holdoff. They are constants at the top of
+`mains/figures.cpp`. The spectra read the simulated `hits` trees and fill all
+non-pileup hits; each run measures its own PulseHistory kernel before the
+corrected spectrum is drawn. `scripts/spectra_inputs.sh` regenerates those
+inputs with the left chain at `tauL = 20 us`, matched to the 20 us pole-zero.
+
+`spread_table.tex` gives the rms of non-pileup pulses within 0.5-1.5 times the
+beam peak; its isolated column is the corrected rms at 0.5 kHz. Those runs used
+`tauL = 25 us` and `tauR = 11 us`, not the 20 and 10 us of the spectra.
 
 ## Run-97 input
 
 `scripts/run97_figure.sh` builds `output/run97/deviation.root` with the local
-MUSIC tooling and then calls `figures` for that figure:
+MUSIC tooling and then redraws the figures:
 
 ```
 bash scripts/run97_figure.sh
@@ -63,8 +89,10 @@ bash scripts/run97_figure.sh
 
 | Path | Contents |
 |---|---|
-| `mains/figures.cpp` | the figures and their input parsing |
-| `include/`, `src/` | the preamp and trapezoid models used by the simulated figures |
-| `scripts/` | the run-97 profile generator |
+| `mains/figures.cpp` | the figures, the spread table and their input parsing |
+| `mains/simulate.cpp` | the hit simulation behind the spectra |
+| `include/`, `src/` | the simulator, and the preamp, trapezoid and PulseHistory adapter `figures` uses |
+| `scripts/` | the spectra and run-97 input generators and the paper-figure copy |
 
-`output/` is gitignored and holds analysis inputs and figure output.
+`output/` holds the inputs and `doc/figs/` the generated figures and table; both
+are gitignored.

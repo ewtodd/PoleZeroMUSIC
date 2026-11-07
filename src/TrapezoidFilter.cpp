@@ -24,3 +24,10 @@ Double_t TrapezoidFilter::Process(Double_t v) {
   return s_ * norm_;
 }
 
+void TrapezoidFilter::Reset() {
+  delay_.assign(delay_.size(), 0.0);
+  pos_ = 0;
+  p_ = 0.0;
+  s_ = 0.0;
+}
+

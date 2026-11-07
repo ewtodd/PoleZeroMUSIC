@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copy the PDFs written by figures into the paper's figures directory.
+# Copy the PDFs and tables written by figures into the paper's figures directory.
 #   bash scripts/copy_figures.sh [source-dir]
 # The source defaults to doc/figs; set DEST to override the paper directory.
 set -euo pipefail
@@ -15,6 +15,7 @@ if ! compgen -G "$SOURCE/*.pdf" > /dev/null; then
 fi
 
 mkdir -p "$DEST"
-for pdf in "$SOURCE"/*.pdf; do
-  cp -v "$pdf" "$DEST/"
+shopt -s nullglob
+for file in "$SOURCE"/*.pdf "$SOURCE"/*.tex; do
+  cp -v "$file" "$DEST/"
 done

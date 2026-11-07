@@ -55,3 +55,19 @@ Double_t Preamp::Sample(Long64_t n) {
   return value;
 }
 
+void Preamp::SkipTo(Long64_t n) {
+  if (current_ < 0 || n <= current_)
+    return;
+  const Double_t dt_ns = Double_t(n - current_) * samplePeriod_ns_;
+  tail_ *= TMath::Exp(-dt_ns / tau_ns_);
+  // Sample(n) will decay by one more sample, so stand one sample before n.
+  current_ = n - 1;
+  tail_ /= decayPerSample_;
+}
+
+void Preamp::Reset() {
+  tail_ = 0.0;
+  current_ = -1;
+  ramping_.clear();
+}
+

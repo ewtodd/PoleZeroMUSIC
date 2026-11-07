@@ -19,6 +19,10 @@ public:
   // Waveform value at sample n (t = n * T_s), without offset or noise. Must be
   // called for consecutive n once started.
   Double_t Sample(Long64_t n);
+  // Advance the decayed-tail state to sample n without evaluating the samples
+  // in between. No event may lie in between.
+  void SkipTo(Long64_t n);
+  void Reset();
 
 private:
   struct RampEvent {

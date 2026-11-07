@@ -1,13 +1,16 @@
 #include "InitUtils.hpp"
 #include "PlottingUtils.hpp"
 #include "Preamp.hpp"
+#include "PulseHistory.hpp"
+#include "PulseHistoryAdapter.hpp"
+#include "SimHit.hpp"
 #include "TrapezoidFilter.hpp"
 #include <TArrow.h>
-#include <TBox.h>
 #include <TCanvas.h>
 #include <TFile.h>
 #include <TGraph.h>
 #include <TGraphErrors.h>
+#include <TH1D.h>
 #include <TH1F.h>
 #include <TLatex.h>
 #include <TLegend.h>
@@ -16,9 +19,11 @@
 #include <TObjArray.h>
 #include <TObjString.h>
 #include <TPad.h>
+#include <TParameter.h>
 #include <TProfile.h>
 #include <TString.h>
 #include <TSystem.h>
+#include <TTree.h>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -122,7 +127,6 @@ const Int_t kRightColour = kRed + 1;
 const Int_t kLeftColour = kBlue + 1;
 const Int_t kShortLeftColour = kCyan + 2;
 const Int_t kMatchedColour = kGreen + 2;
-const Int_t kReadingColour[3] = {kOrange + 1, kMagenta + 1, kTeal + 3};
 
 TH1F *Frame(TVirtualPad *pad, Double_t x1, Double_t y1, Double_t x2,
             Double_t y2, const char *xTitle, const char *yTitle) {
@@ -335,7 +339,7 @@ void PoleZeroFigure() {
 
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   Frame(canvas, tMin, yLo, tMax, yHi, "Time [#mus]",
-        "Filter Output  #hat{#it{s}}(t) [a.u.]");
+        "Filter Output #hat{#it{s}}(t) [a.u.]");
   Reference(tMin, tMax, 0.0);
   TimeMark(endUs, yLo, yHi);
 
@@ -352,8 +356,8 @@ void PoleZeroFigure() {
   }
   canvas->RedrawAxis();
 
-  Note(endUs + 1.55, 0.31, "Over-compensated", 10, colour[1]);
-  Note(endUs + 4, -0.14, "Under-compensated", 13, colour[0]);
+  Note(endUs + 1.55, 0.31, "over-compensated", 10, colour[1]);
+  Note(endUs + 4, -0.14, "under-compensated", 13, colour[0]);
   Note(endUs + 0.4, yLo + 0.06, "(#it{k}+#it{l})#it{T}", 10);
 
   TLegend *legend = Legend(labels, 0.16, 0.33);
@@ -387,7 +391,7 @@ void SinglePulseFigure() {
   TGraph *out = StepResponse(tauPre, kPoleZeroUs, one, tMin, tMax, 8);
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   Frame(canvas, tMin, yLo, tMax, yHi, "Time [#mus]",
-        "Filter Output  #hat{#it{s}}(t)  [a.u.]");
+        "Filter Output #hat{#it{s}}(t) [a.u.]");
   Reference(tMin, tMax, 0.0);
   TimeMark(0.0, yLo, markTop);
   TimeMark(kUs, yLo, markTop);
@@ -451,9 +455,8 @@ void PileupPairFigure() {
   TGraph *alone = StepResponse(tauPre, kPoleZeroUs, second, tMin, tMax, 8);
 
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
-  Frame(canvas, tMin, yLo, tMax, yHi,
-        "time since pulse 1  #it{t}  [#mus]",
-        "filter output  #hat{#it{s}}  [a.u.]");
+  Frame(canvas, tMin, yLo, tMax, yHi, "Time [#mus]",
+        "Filter Output #hat{#it{s}}(t) [a.u.]");
   PlottingUtils::ConfigureGraph(pair, kRightColour);
   pair->Draw("L SAME");
   PlottingUtils::ConfigureGraph(first, kGray + 2);
@@ -467,8 +470,8 @@ void PileupPairFigure() {
   TimeMark(0.0, yLo, markTop);
   TimeMark(dt, yLo, markTop);
   TimeMark(dt + tm, yLo, markTop);
-  Note(0.0, 1.17, "pulse 1", 21);
-  Note(dt, 1.17, "pulse 2", 21);
+  Note(0.1, 1.2, "pulse 1", 21);
+  Note(dt, 1.2, "pulse 2", 21);
   Note(dt + tm, 1.17, "#it{E}_{2} read", 21);
   TimeArrow(0.0, dt, 1.42, 1.48, "#Delta#it{t}");
   TimeArrow(dt, dt + tm, 1.42, 1.48, "#it{t}_{m}");
@@ -496,22 +499,23 @@ void PileupPairFigure() {
   reads->SetMarkerColor(kBlack);
   reads->Draw("P SAME");
 
-  const Double_t xText = 14.2;
+  const Double_t xLossText = 14.2;
   TLine *leadLoss =
-      new TLine(dt + tm + 0.15, 0.5 * (yAlone + yPair), xText - 0.2, 0.70);
+      new TLine(dt + tm + 0.15, 0.5 * (yAlone + yPair), xLossText - 0.2, 0.70);
   leadLoss->SetLineWidth(PlottingUtils::GetLineWidth());
   leadLoss->Draw();
-  Note(xText, 0.70, Form("loss = %.3f", yAlone - yPair), 12);
+  Note(xLossText, 0.70, Form("loss = %.3f", yAlone - yPair), 12);
+  const Double_t xTailText = 11.5;
   TLine *leadTail =
-      new TLine(dt + tm + 0.15, 0.5 * yTail, xText - 0.2, -0.45);
+      new TLine(dt + tm + 0.15, 0.5 * yTail, xTailText - 0.2, -0.45);
   leadTail->SetLineWidth(PlottingUtils::GetLineWidth());
   leadTail->Draw();
-  Note(xText, -0.45, Form("tail of pulse 1 = %.3f", yTail), 12);
+  Note(xTailText, -0.45, Form("tail of pulse 1 = %.3f", yTail), 12);
 
   std::vector<TString> labels;
-  labels.push_back("both pulses");
-  labels.push_back("pulse 1 alone");
-  labels.push_back("pulse 2 alone");
+  labels.push_back("Measured");
+  labels.push_back("Pulse 1");
+  labels.push_back("Pulse 2");
   TLegend *legend = Legend(labels, 0.62, 0.87);
   legend->AddEntry(pair, labels[0], "l");
   legend->AddEntry(first, labels[1], "l");
@@ -526,27 +530,149 @@ void PileupPairFigure() {
             << std::endl;
 }
 
+Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits,
+                Double_t &beamPeak) {
+  TFile in(path, "READ");
+  if (in.IsZombie()) {
+    std::cerr << "cannot open " << path << std::endl;
+    return kFALSE;
+  }
+  TTree *tree = (TTree *)in.Get("hits");
+  if (!tree) {
+    std::cerr << "no hits tree in " << path << std::endl;
+    return kFALSE;
+  }
+  beamPeak = 1600.0;
+  TParameter<Double_t> *peak = (TParameter<Double_t> *)in.Get("beamPeakADC");
+  if (peak)
+    beamPeak = peak->GetVal();
+
+  Int_t channel = 0;
+  ULong64_t timestamp = 0;
+  Double_t energy = 0.0, dtPrev = 0.0, dtNext = 0.0, trueAmp = 0.0,
+           prevTrueAmp = 0.0;
+  Bool_t pileup = kFALSE;
+  Long64_t eventIndex = 0;
+  tree->SetBranchAddress("channel", &channel);
+  tree->SetBranchAddress("timestamp", &timestamp);
+  tree->SetBranchAddress("energy", &energy);
+  tree->SetBranchAddress("dtPrev", &dtPrev);
+  tree->SetBranchAddress("dtNext", &dtNext);
+  tree->SetBranchAddress("trueAmp", &trueAmp);
+  tree->SetBranchAddress("prevTrueAmp", &prevTrueAmp);
+  tree->SetBranchAddress("pileup", &pileup);
+  tree->SetBranchAddress("eventIndex", &eventIndex);
+  hits.clear();
+  hits.reserve(size_t(tree->GetEntries()));
+  for (Long64_t i = 0; i < tree->GetEntries(); i++) {
+    tree->GetEntry(i);
+    SimHit hit;
+    hit.channel = channel;
+    hit.timestamp = timestamp;
+    hit.energy = energy;
+    hit.dtPrev = dtPrev;
+    hit.dtNext = dtNext;
+    hit.trueAmp = trueAmp;
+    hit.prevTrueAmp = prevTrueAmp;
+    hit.pileup = pileup;
+    hit.eventIndex = eventIndex;
+    hits.push_back(hit);
+  }
+  in.Close();
+  return kTRUE;
+}
+
+// Pulse-height spectra of one simulated run. Non-pileup hits enter the
+// histograms.
+void DrawSpectrum(const std::vector<SimHit> &hits,
+                  const std::vector<Double_t> &energies, Double_t beamPeak,
+                  const TString &label, const TString &name,
+                  const char *panel) {
+  TH1D *left = new TH1D("spectrum_L", ";Pulse Height [ADC];Counts", 300, 0.0,
+                        2.5 * beamPeak);
+  TH1D *right = new TH1D("spectrum_R", ";Pulse Height [ADC];Counts", 300, 0.0,
+                         2.5 * beamPeak);
+  left->SetDirectory(nullptr);
+  right->SetDirectory(nullptr);
+
+  for (Int_t i = 0; i < Int_t(hits.size()); i++) {
+    if (hits[i].pileup)
+      continue;
+    TH1D *hist = hits[i].channel == 0 ? left : right;
+    hist->Fill(energies[i]);
+  }
+
+  TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
+  // Five-digit counts need more room than the style's left margin. Drawing
+  // applies the style, so the title offset has to be set afterwards.
+  canvas->SetLeftMargin(0.18);
+  const Double_t yMax =
+      1.45 * TMath::Max(left->GetMaximum(), right->GetMaximum());
+  left->SetMaximum(yMax);
+  PlottingUtils::ConfigureAndDrawHistogram(left, kLeftColour,
+                                           ";Pulse Height [ADC];Counts");
+  left->GetYaxis()->SetTitleOffset(1.4);
+  PlottingUtils::ConfigureHistogram(right, kRightColour);
+  right->Draw("HIST SAME");
+
+  std::vector<TString> labels;
+  labels.push_back("#tau_{pz} = #tau_{pre}");
+  labels.push_back("#tau_{pz} #neq #tau_{pre}");
+  TLegend *legend = Legend(labels, 0.74, 0.87);
+  legend->AddEntry(left, labels[0], "l");
+  legend->AddEntry(right, labels[1], "l");
+  legend->Draw();
+  PlottingUtils::AddText(label, 0.88, 0.92);
+  PanelLabel(panel);
+  PlottingUtils::SaveFigure(canvas, name, "", PlotSaveOptions::kLINEAR);
+  delete canvas;
+}
+
+void SpectrumFigure(const TString &path, const TString &label) {
+  std::vector<SimHit> hits;
+  Double_t beamPeak = 0.0;
+  if (!ReadHits(path, hits, beamPeak))
+    return;
+
+  const char *panel = label == "1kHz" ? "(a)" : "(b)";
+  std::vector<Double_t> raw(hits.size(), 0.0);
+  for (Int_t i = 0; i < Int_t(hits.size()); i++)
+    raw[i] = hits[i].energy;
+  DrawSpectrum(hits, raw, beamPeak, label,
+               Form("spectrum_%s", label.Data()), panel);
+
+  PulseHistoryAdapter::Adapted adapted = PulseHistoryAdapter::Build(hits);
+  std::vector<Int_t> groups = PulseHistory::BuildGroupMap();
+  PulseHistory::Result kernel;
+  if (!PulseHistory::Measure(adapted.hits, groups, kernel, label)) {
+    std::cerr << "PulseHistory::Measure failed for " << path << std::endl;
+    return;
+  }
+  kernel.n_corrected = 0;
+  kernel.n_clamped = 0;
+  PulseHistory::Apply(adapted.hits, groups, kernel);
+  std::vector<Double_t> corrected =
+      PulseHistoryAdapter::CorrectedEnergies(adapted, hits);
+  DrawSpectrum(hits, corrected, beamPeak, label,
+               Form("spectrum_%s_corrected", label.Data()), panel);
+}
+
 // ----------------------------------------------------------- data figures
 // (Fig. 3) The kernels PulseHistory fitted on run 97.
 void KernelFigure(const std::vector<std::vector<Double_t>> &kernels) {
-  const char *name[3] = {"long left", "long right", "short left"};
+  const char *name[3] = {"Long Strips, Left", "Long Strips, Right",
+                         "Short Strips, Left"};
   const Int_t colour[3] = {kLeftColour, kRightColour, kShortLeftColour};
   const Int_t order[3] = {1, 0, 2};
   const Double_t xLo = 1.0, xHi = 350.0, yLo = -0.2, yHi = 0.75;
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   canvas->SetLogx();
   TH1F *frame = Frame(canvas, xLo, yLo, xHi, yHi,
-                      "time since the earlier pulse  #Delta#it{t}  [#mus]",
-                      "shift per unit earlier pulse height");
+                      "Time Between Pulses #Delta#it{t} [#mus]",
+                      "Shift / Previous Pulse Height");
   frame->GetXaxis()->SetMoreLogLabels();
   frame->GetXaxis()->SetNoExponent();
 
-  TBox *inside = new TBox(xLo, yLo, 3.5, yHi);
-  inside->SetFillColorAlpha(kGray, 0.35);
-  inside->Draw();
-  TBox *frozen = new TBox(3.5, yLo, 7.0, yHi);
-  frozen->SetFillColorAlpha(kAzure - 9, 0.35);
-  frozen->Draw();
   Reference(xLo, xHi, 0.0);
 
   std::vector<TGraph *> graphs;
@@ -567,109 +693,88 @@ void KernelFigure(const std::vector<std::vector<Double_t>> &kernels) {
   std::vector<TString> labels;
   for (Int_t j = 0; j < 3; j++)
     labels.push_back(name[order[j]]);
-  labels.push_back("read point in the earlier trapezoid");
-  labels.push_back("baseline still frozen");
-  TLegend *legend = Legend(labels, 0.52, 0.86);
+  TLegend *legend = Legend(labels, 0.64, 0.86);
   for (Int_t j = 0; j < 3; j++)
     legend->AddEntry(graphs[j], labels[j], "LP");
-  legend->AddEntry(inside, labels[3], "F");
-  legend->AddEntry(frozen, labels[4], "F");
   legend->Draw();
   PlottingUtils::SaveFigure(canvas, "kernel_run97", "",
                             PlotSaveOptions::kLINEAR);
   delete canvas;
 }
 
-// (Fig. 4) Simulated spread against rate for the three baseline readings.
-void SpreadFigure(const ReadingSpreads &spreads, Int_t side) {
+// The simulated rms spread of each baseline reading, before and after
+// correction, as a booktabs tabular for the paper to \input (needs siunitx).
+// The isolated column is the corrected spread at 0.5 kHz.
+void SpreadTable(const ReadingSpreads &spreads, const TString &path) {
   struct Reading {
     const char *key;
     const char *label;
   };
   const std::vector<Reading> readings = {
       {"ideal", "never takes in the tail"},
-      {"wait", "frozen until within 80 ADC"},
+      {"wait", "frozen until within \\SI{80}{ADC}"},
       {"follow", "restarts after the freeze"}};
-  const Double_t xHi = 85.0, yLo = 0.9;
-  const Double_t yHi = side == 1 ? 3.0 : 2.3;
-  TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
-  Frame(canvas, 0.0, yLo, xHi, yHi, "rate per channel  [kHz]",
-        "rms / rms of isolated pulses");
-  Reference(0.0, xHi, 1.0);
+  const Double_t isolatedRate = 0.5;
+  const std::vector<Double_t> rates = {10.0, 44.0, 80.0};
 
-  std::vector<TGraph *> corrected;
-  std::vector<TString> labels;
-  for (Int_t j = 0; j < Int_t(readings.size()); j++) {
+  // A partial table would quietly replace the good one.
+  std::vector<Double_t> needed = rates;
+  needed.push_back(isolatedRate);
+  for (size_t j = 0; j < readings.size(); j++) {
     ReadingSpreads::const_iterator reading = spreads.find(readings[j].key);
-    if (reading == spreads.end())
-      continue;
-    RateSpreads::const_iterator floorPoint = reading->second.find(0.5);
-    if (floorPoint == reading->second.end())
-      continue;
-    const Double_t floor = floorPoint->second.corr[side];
-    TGraph *before = new TGraph();
-    TGraph *after = new TGraph();
-    for (RateSpreads::const_iterator point = reading->second.begin();
-         point != reading->second.end(); ++point) {
-      if (point->first < 1.0)
-        continue;
-      before->SetPoint(before->GetN(), point->first,
-                       point->second.raw[side] / floor);
-      after->SetPoint(after->GetN(), point->first,
-                      point->second.corr[side] / floor);
-      std::cout << Form("  %s %-7s %5.1f kHz: %6.1f -> %6.1f ADC (floor %.1f)",
-                        side ? "R" : "L", readings[j].key, point->first,
-                        point->second.raw[side], point->second.corr[side],
-                        floor)
-                << std::endl;
+    for (size_t i = 0; i < needed.size(); i++) {
+      if (reading == spreads.end() ||
+          reading->second.find(needed[i]) == reading->second.end()) {
+        std::cout << "skipping spread_table: no " << readings[j].key << " at "
+                  << needed[i] << " kHz" << std::endl;
+        return;
+      }
     }
-    PlottingUtils::ConfigureGraph(before, kReadingColour[j]);
-    before->SetLineStyle(2);
-    before->SetMarkerStyle(24 + j);
-    before->SetMarkerColor(kReadingColour[j]);
-    before->SetMarkerSize(1.2);
-    before->Draw("LP SAME");
-    PlottingUtils::ConfigureGraph(after, kReadingColour[j]);
-    after->SetMarkerStyle(20 + j);
-    after->SetMarkerColor(kReadingColour[j]);
-    after->SetMarkerSize(1.2);
-    after->Draw("LP SAME");
-    corrected.push_back(after);
-    labels.push_back(readings[j].label);
   }
-  canvas->RedrawAxis();
 
-  PlottingUtils::AddText(side ? "long right segments" : "long left segments",
-                         0.87, 0.865);
-  if (side == 1) {
-    TLegend *legend = Legend(labels, 0.645, 0.86, "baseline", kTRUE);
-    for (Int_t j = 0; j < Int_t(corrected.size()); j++)
-      legend->AddEntry(corrected[j], labels[j], "LP");
-    legend->Draw();
-  } else {
-    std::vector<TString> keys;
-    keys.push_back("before correction");
-    keys.push_back("after correction");
-    TLegend *legend = Legend(keys, 0.70, 0.86, "", kTRUE);
-    TGraph *beforeKey = new TGraph();
-    PlottingUtils::ConfigureGraph(beforeKey, kGray + 2);
-    beforeKey->SetLineStyle(2);
-    beforeKey->SetMarkerStyle(24);
-    beforeKey->SetMarkerColor(kGray + 2);
-    beforeKey->SetMarkerSize(1.2);
-    TGraph *afterKey = new TGraph();
-    PlottingUtils::ConfigureGraph(afterKey, kGray + 2);
-    afterKey->SetMarkerStyle(20);
-    afterKey->SetMarkerColor(kGray + 2);
-    afterKey->SetMarkerSize(1.2);
-    legend->AddEntry(beforeKey, keys[0], "LP");
-    legend->AddEntry(afterKey, keys[1], "LP");
-    legend->Draw();
+  std::ofstream table(path.Data());
+  table << "% Written by mains/figures.cpp; edit that, not this file."
+        << std::endl;
+  // Scoped by the table the paper inputs this into; without them the tabular
+  // overflows the text width of the elsarticle preprint.
+  table << "\\small" << std::endl;
+  table << "\\setlength{\\tabcolsep}{4pt}" << std::endl;
+  table << "\\begin{tabular}{@{}lccccccc@{}}" << std::endl;
+  table << "\\toprule" << std::endl;
+  table << "&";
+  for (size_t i = 0; i < rates.size(); i++)
+    table << Form(" & \\multicolumn{2}{c}{\\SI{%.0f}{\\kilo\\hertz}}", rates[i]);
+  table << " \\\\" << std::endl;
+  table << "\\cmidrule(lr){3-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-8}"
+        << std::endl;
+  table << "Baseline & isolated";
+  for (size_t i = 0; i < rates.size(); i++)
+    table << " & before & after";
+  table << " \\\\" << std::endl;
+
+  const Int_t nSides = 2;
+  const Int_t sides[nSides] = {1, 0};
+  const char *sideNames[nSides] = {"Long right segments",
+                                   "Long left segments"};
+  for (Int_t s = 0; s < nSides; s++) {
+    table << "\\midrule" << std::endl;
+    table << "\\multicolumn{8}{l}{\\textit{" << sideNames[s] << "}} \\\\"
+          << std::endl;
+    for (size_t j = 0; j < readings.size(); j++) {
+      const RateSpreads &byRate = spreads.find(readings[j].key)->second;
+      table << readings[j].label
+            << Form(" & %.1f", byRate.find(isolatedRate)->second.corr[sides[s]]);
+      for (size_t i = 0; i < rates.size(); i++) {
+        const Spread &spread = byRate.find(rates[i])->second;
+        table << Form(" & %.1f & %.1f", spread.raw[sides[s]],
+                      spread.corr[sides[s]]);
+      }
+      table << " \\\\" << std::endl;
+    }
   }
-  PanelLabel(side ? "(a)" : "(b)");
-  PlottingUtils::SaveFigure(canvas, side ? "sim_R" : "sim_L", "",
-                            PlotSaveOptions::kLINEAR);
-  delete canvas;
+  table << "\\bottomrule" << std::endl;
+  table << "\\end{tabular}" << std::endl;
+  std::cout << "wrote " << path << std::endl;
 }
 
 TGraphErrors *ProfileGraph(const TProfile *profile) {
@@ -700,8 +805,8 @@ void DeviationFigure(const TString &file) {
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   canvas->SetLogx();
   TH1F *frame = Frame(canvas, xLo, yLo, xHi, yHi,
-                      "time since the previous pulse  #Delta#it{t}  [#mus]",
-                      "pulse height #minus#kern[0.3]{mean}  [ADC]");
+                      "Time Between Pulses #Delta#it{t} [#mus]",
+                      "Pulse Height #minus Average [ADC]");
   frame->GetXaxis()->SetMoreLogLabels();
   frame->GetXaxis()->SetNoExponent();
   Reference(xLo, xHi, 0.0);
@@ -720,13 +825,12 @@ void DeviationFigure(const TString &file) {
   canvas->RedrawAxis();
 
   std::vector<TString> labels;
-  labels.push_back("before correction");
-  labels.push_back("after correction");
+  labels.push_back("Before");
+  labels.push_back("After");
   TLegend *legend = Legend(labels, 0.70, 0.86, "", kTRUE);
   legend->AddEntry(before, labels[0], "LP");
   legend->AddEntry(after, labels[1], "LP");
   legend->Draw();
-  PlottingUtils::AddText("long right segments, run 97", 0.87, 0.865);
   PlottingUtils::SaveFigure(canvas, "run97_deviation_R", "",
                             PlotSaveOptions::kLINEAR);
   delete canvas;
@@ -764,6 +868,8 @@ int main(int argc, char **argv) {
                 "/MUSIC/analysis/37Cl/pipeline_fused.log";
   TString sims = "output/paper_sim/analysis.log";
   TString run97 = "output/run97/deviation.root";
+  TString long1 = "output/figures/long_1kHz.root";
+  TString long40 = "output/figures/long_40kHz.root";
   PlotSaveFormat format = PlotSaveFormat::kPNGAndPDF;
   for (Int_t i = 1; i < argc; i++) {
     TString argument = argv[i];
@@ -777,6 +883,10 @@ int main(int argc, char **argv) {
       sims = argument(6, argument.Length() - 6);
     else if (argument.BeginsWith("--run97="))
       run97 = argument(8, argument.Length() - 8);
+    else if (argument.BeginsWith("--long1="))
+      long1 = argument(8, argument.Length() - 8);
+    else if (argument.BeginsWith("--long40="))
+      long40 = argument(9, argument.Length() - 9);
     else if (argument == "--format=png")
       format = PlotSaveFormat::kPNG;
     else if (argument == "--format=pdf")
@@ -788,6 +898,10 @@ int main(int argc, char **argv) {
   PoleZeroFigure();
   SinglePulseFigure();
   PileupPairFigure();
+  if (HaveInput(long1, "spectrum_1kHz"))
+    SpectrumFigure(long1, "1kHz");
+  if (HaveInput(long40, "spectrum_40kHz"))
+    SpectrumFigure(long40, "40kHz");
 
   if (HaveInput(log, "kernel_run97")) {
     std::vector<std::vector<Double_t>> kernels = ReadKernels(log, run);
@@ -804,16 +918,14 @@ int main(int argc, char **argv) {
   TObjArray *files = sims.Tokenize(",");
   for (Int_t i = 0; i < files->GetEntries(); i++) {
     const TString file = ((TObjString *)files->At(i))->GetString();
-    if (HaveInput(file, "sim_R and sim_L"))
+    if (HaveInput(file, "spread_table"))
       ReadSpreads(file, spreads);
     else
       haveSims = kFALSE;
   }
   delete files;
-  if (haveSims) {
-    SpreadFigure(spreads, 1);
-    SpreadFigure(spreads, 0);
-  }
+  if (haveSims && format != PlotSaveFormat::kPNG)
+    SpreadTable(spreads, out + "/spread_table.tex");
 
   if (HaveInput(run97, "run97_deviation_R"))
     DeviationFigure(run97);
