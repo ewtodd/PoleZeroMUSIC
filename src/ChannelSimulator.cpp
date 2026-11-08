@@ -83,7 +83,7 @@ void ChannelSimulator::HandleTriggers(Long64_t n) {
   while (nextEvent_ < events_.NEvents() && TriggerSample(nextEvent_) == n) {
     const Long64_t i = nextEvent_;
     nextEvent_++;
-    preamp_.AddEvent(events_.Time_ns(i), events_.Amplitude(i));
+    preamp_.AddEvent(events_.Time_ns(i), events_.ChannelAmplitude(i, channel_));
     if (lastTriggerSample_ >= 0 &&
         n - lastTriggerSample_ < cfg_.TriggerHoldoffSamples()) {
       dropped_++;
@@ -110,7 +110,7 @@ void ChannelSimulator::HandleTriggers(Long64_t n) {
     pending_.push_back(r);
     lastTriggerSample_ = n;
     lastTriggerTime_ns_ = events_.Time_ns(i);
-    lastTriggerAmp_ = events_.Amplitude(i);
+    lastTriggerAmp_ = events_.ChannelAmplitude(i, channel_);
   }
 }
 
@@ -131,10 +131,11 @@ void ChannelSimulator::HandleReadouts(Long64_t n, Double_t trap) {
     h.energy = r.sum / avg - r.frozenBaseline;
     h.dtPrev = r.dtPrev_us;
     h.dtNext = -1.0;
-    h.trueAmp = events_.Amplitude(r.eventIndex);
+    h.trueAmp = events_.ChannelAmplitude(r.eventIndex, channel_);
     h.prevTrueAmp = r.prevAmp;
     h.pileup = r.pileup;
     h.eventIndex = r.eventIndex;
+    h.reaction = events_.Reacted(r.eventIndex);
     hits_.push_back(h);
   }
   pending_.resize(keep);

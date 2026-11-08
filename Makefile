@@ -1,7 +1,8 @@
-# Figures for doc/kernel_note.tex. Preferred build: `nix build` -> result/bin/.
+# Figures for the pole-zero paper. Preferred build: `nix build` -> result/bin/.
 # This Makefile is the interactive fallback, run inside `nix develop`: make -j
-# The unmodified MUSIC PulseHistory (and the Constants it reads) are compiled
-# from $(MUSIC_TOOLING) into this project's objects; nothing there is edited.
+# The unmodified MUSIC PulseHistory (with the Constants it reads and the Plots
+# it saves through) is compiled from $(MUSIC_TOOLING) into this project's
+# objects; nothing there is edited.
 
 CXX         := g++
 ROOT_CFLAGS := $(shell root-config --cflags)
@@ -22,7 +23,7 @@ LDFLAGS  := $(ROOT_LIBS) -lMinuit -lanalysis-utils -lpthread
 
 HEADERS    := $(wildcard $(INC_DIR)/*.hpp)
 SRC_OBJS   := $(patsubst $(SRC_DIR)/%.cpp,$(BUILD_DIR)/%.o,$(wildcard $(SRC_DIR)/*.cpp))
-MUSIC_SRCS := PulseHistory Constants
+MUSIC_SRCS := PulseHistory Constants Plots
 MUSIC_OBJS := $(addprefix $(BUILD_DIR)/music_,$(addsuffix .o,$(MUSIC_SRCS)))
 BINS       := simulate figures
 BIN_PATHS  := $(addprefix $(BIN_DIR)/,$(BINS))

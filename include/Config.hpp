@@ -36,12 +36,13 @@ struct Config {
   // 262 us), ruled out by run 97.
   Int_t baselineDecimation = 1;
   // A first-order low-pass on the running-mean baseline. CAEN support says the
-  // firmware has no such filter (2026-10-19). It stays on by default only
-  // because, with the restart below, it reproduces a small shift that pulses
-  // 80-500 us earlier cause in run 97, whose real cause is not known (README,
-  // "Baseline restorer in production"). Turn it off for the firmware as CAEN
-  // describes it.
-  Bool_t lfFilterOn = true;
+  // firmware has no such filter (2026-10-19), so it is off by default. It is
+  // kept as an option because, with the restart below, it is the only model
+  // found to reproduce a small shift in run 97 from pulses 80-500 us earlier
+  // (about +0.0009 per unit earlier height at 80-130 us, about +1 % overall at
+  // 44 kHz). Without it that shift is not simulated; its real cause is not
+  // known (a slow second decay in the R preamp is one candidate).
+  Bool_t lfFilterOn = false;
   Double_t lfFilterTauUs = 16.384;
   // Conditional baseline restart: after the holdoff the baseline stays frozen
   // until the trapezoid is back within this many ADC of the frozen baseline,
@@ -98,6 +99,12 @@ struct Config {
   Double_t rate_kHz = 40.0;
   Long64_t nEvents = 200000;
   UInt_t seed = 12345;
+  // Reactions: this fraction of particles react upstream of the two long ends,
+  // which then see a pair of deposits drawn from reactionPairs instead (lines
+  // "rL rR weight", in units of the beam peak, which scripts/reaction_inputs.sh
+  // writes from MUSIC's 37Cl simulation). 0 simulates the beam alone.
+  Double_t reactionFraction = 0.0;
+  TString reactionPairs = "";
   // Output ROOT file of the simulation (or input of the analysis).
   TString outputFile = "output/sim_40kHz.root";
   // Snippet selection: a pair of pulses with dt near this value is saved as

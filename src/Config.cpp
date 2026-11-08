@@ -87,6 +87,8 @@ Bool_t Config::ParseCommandLine(Int_t argc, char **argv) {
                 MatchDouble(name, value, "noiseSigmaADC_L", noiseSigmaADC_L) ||
                 MatchDouble(name, value, "noiseSigmaADC_R", noiseSigmaADC_R) ||
                 MatchDouble(name, value, "rate_kHz", rate_kHz) ||
+                MatchDouble(name, value, "reactionFraction",
+                            reactionFraction) ||
                 MatchDouble(name, value, "snippetDt_us", snippetDt_us);
     if (!ok && name == "nEvents") {
       nEvents = Long64_t(std::atoll(value.Data()));
@@ -98,6 +100,10 @@ Bool_t Config::ParseCommandLine(Int_t argc, char **argv) {
     }
     if (!ok && name == "outputFile") {
       outputFile = value;
+      ok = kTRUE;
+    }
+    if (!ok && name == "reactionPairs") {
+      reactionPairs = value;
       ok = kTRUE;
     }
     if (!ok && name == "lfFilterOn") {
@@ -160,6 +166,8 @@ void Config::Print(std::ostream &os) const {
   os << "  rate_kHz             = " << rate_kHz << std::endl;
   os << "  nEvents              = " << nEvents << std::endl;
   os << "  seed                 = " << seed << std::endl;
+  os << "  reactionFraction     = " << reactionFraction << std::endl;
+  os << "  reactionPairs        = " << reactionPairs << std::endl;
   os << "  outputFile           = " << outputFile << std::endl;
   os << "  snippetDt_us         = " << snippetDt_us << std::endl;
 }

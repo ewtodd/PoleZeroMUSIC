@@ -10,8 +10,8 @@
 // samples are pushed out one by one as new ones arrive.
 //
 // Optionally a first-order low-pass is applied on top of the running mean.
-// CAEN support says the firmware has none (2026-10-19); it is kept as an
-// option for the fits described in the README.
+// CAEN support says the firmware has none (2026-10-19), so it is off by
+// default; Config::lfFilterOn says why it is kept as an option.
 //
 // Optionally the restart is conditional (UM5960: "once the trapezoid is
 // returned to the baseline, the averaging restarts"): after the holdoff the

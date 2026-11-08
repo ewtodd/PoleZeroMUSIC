@@ -4,8 +4,8 @@
     nixpkgs.follows = "utils/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
     utils.url = "github:ewtodd/Analysis-Utilities";
-    # The MUSIC monorepo, pinned. Only its tooling PulseHistory and Constants
-    # are compiled into the figures binary; nothing there is edited.
+    # The MUSIC monorepo, pinned. Only its tooling PulseHistory, Constants and
+    # Plots are compiled into the binaries; nothing there is edited.
     music = {
       url = "github:ewtodd/MUSIC";
       inputs.nixpkgs.follows = "utils/nixpkgs";

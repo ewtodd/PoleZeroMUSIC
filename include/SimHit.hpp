@@ -15,6 +15,7 @@ struct SimHit {
   Double_t prevTrueAmp;  // of the previous accepted hit on this channel
   Bool_t pileup;         // dtPrev or dtNext < trapRise + trapFlat
   Long64_t eventIndex;   // index into the truth list
+  Bool_t reaction;       // the particle reacted upstream (EventGenerator)
 };
 
 // Raw waveform, trapezoid output and baseline around a pair of pulses.

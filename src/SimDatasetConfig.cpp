@@ -41,9 +41,9 @@ void InitSimDatasetConfig() {
   // The pinned tooling ships every group off; the simulated long ends get the
   // binned kernel (one coefficient per log dt bin), as in production.
   gInstance.PULSE_HISTORY_GROUPS.long_left.enabled = kTRUE;
-  gInstance.PULSE_HISTORY_GROUPS.long_left.kernel = kPulseHistoryBinned;
+  gInstance.PULSE_HISTORY_GROUPS.long_left.kernel = kBINNED;
   gInstance.PULSE_HISTORY_GROUPS.long_right.enabled = kTRUE;
-  gInstance.PULSE_HISTORY_GROUPS.long_right.kernel = kPulseHistoryBinned;
+  gInstance.PULSE_HISTORY_GROUPS.long_right.kernel = kBINNED;
 
   gInstance.STRIP_E_MAX_ADC = 4096.0;
 

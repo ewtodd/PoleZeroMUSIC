@@ -17,6 +17,23 @@
         "type": "github"
       }
     },
+    "clad-src_2": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790572406,
+        "narHash": "sha256-NIU2Sp8eBMpQ+1bSdykVnJJKTo8KS/2hBVKPAg1MwGg=",
+        "owner": "vgvassilev",
+        "repo": "clad",
+        "rev": "06f4bc8c6b1d36958519acc006dda22ad2731647",
+        "type": "github"
+      },
+      "original": {
+        "owner": "vgvassilev",
+        "ref": "v2.5",
+        "repo": "clad",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -100,11 +117,11 @@
         "utils": "utils"
       },
       "locked": {
-        "lastModified": 1790898469,
-        "narHash": "sha256-f5Aex6oCh35HkogASIaY3i1cHEmBcxcstTUZuXWteC4=",
+        "lastModified": 1794107516,
+        "narHash": "sha256-PT/FfG499rTrtG74WNts/Hwfn37UPdV5n2zxG792vUo=",
         "owner": "ewtodd",
         "repo": "MUSIC",
-        "rev": "017043be562f78d751bdc690f9b5f0b7f97045f8",
+        "rev": "577ef6c209b0e6db8605ab0a06e4633b9b40e93a",
         "type": "github"
       },
       "original": {
@@ -157,6 +174,23 @@
       }
     },
     "root-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792401138,
+        "narHash": "sha256-QU4gODLwlGIbIFt+wAq4GikdwzIUWwix1bgP26i/GIE=",
+        "owner": "root-project",
+        "repo": "root",
+        "rev": "e0e5723692467ac53dcc5871e990a68f1e5adf30",
+        "type": "github"
+      },
+      "original": {
+        "owner": "root-project",
+        "repo": "root",
+        "rev": "e0e5723692467ac53dcc5871e990a68f1e5adf30",
+        "type": "github"
+      }
+    },
+    "root-src_2": {
       "flake": false,
       "locked": {
         "lastModified": 1792401138,
@@ -241,11 +275,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1790019017,
-        "narHash": "sha256-s71oE55Qw3o+TBp8lEYDalpR+tb0rv/YoUPbozfC6ZQ=",
+        "lastModified": 1791388822,
+        "narHash": "sha256-ilBDHiCuRpULJX9TBBQx+cGBqlqEr1HjtUYYHXn9+qk=",
         "owner": "ewtodd",
         "repo": "talys-nix",
-        "rev": "dd5344c4c614e909893d0ae3b3736daafb9cfab0",
+        "rev": "a7f8ba3a78557104c3ae41083608b8765173ffad",
         "type": "github"
       },
       "original": {
@@ -256,15 +290,17 @@
     },
     "utils": {
       "inputs": {
+        "clad-src": "clad-src",
         "flake-utils": "flake-utils_3",
-        "nixpkgs": "nixpkgs"
+        "nixpkgs": "nixpkgs",
+        "root-src": "root-src"
       },
       "locked": {
-        "lastModified": 1790097080,
-        "narHash": "sha256-LIKh44WEGXSAWJuCGFu7vv/fuaAUYX8NA0g57v3cEeg=",
+        "lastModified": 1793212189,
+        "narHash": "sha256-vYl9+/gTk9QYOVggy9ePCYTsauUAFUZHh+8mrwSH/is=",
         "owner": "ewtodd",
         "repo": "Analysis-Utilities",
-        "rev": "a030519fea84914ecd5439d629f42aedf3424fa5",
+        "rev": "623c4d6d496c4e58cb27e72211610c70f2ef34a8",
         "type": "github"
       },
       "original": {
@@ -275,10 +311,10 @@
     },
     "utils_2": {
       "inputs": {
-        "clad-src": "clad-src",
+        "clad-src": "clad-src_2",
         "flake-utils": "flake-utils_4",
         "nixpkgs": "nixpkgs_2",
-        "root-src": "root-src"
+        "root-src": "root-src_2"
       },
       "locked": {
         "lastModified": 1793212189,

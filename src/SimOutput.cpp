@@ -76,7 +76,7 @@ Bool_t Write(const Config &cfg, const EventGenerator &events,
   ULong64_t timestamp = 0;
   Double_t energy = 0.0, dtPrev = 0.0, dtNext = 0.0, trueAmp = 0.0,
            prevTrueAmp = 0.0;
-  Bool_t pileup = kFALSE;
+  Bool_t pileup = kFALSE, reaction = kFALSE;
   Long64_t eventIndex = 0;
   tree->Branch("channel", &channel, "channel/I");
   tree->Branch("timestamp", &timestamp, "timestamp/l");
@@ -87,6 +87,7 @@ Bool_t Write(const Config &cfg, const EventGenerator &events,
   tree->Branch("prevTrueAmp", &prevTrueAmp, "prevTrueAmp/D");
   tree->Branch("pileup", &pileup, "pileup/O");
   tree->Branch("eventIndex", &eventIndex, "eventIndex/L");
+  tree->Branch("reaction", &reaction, "reaction/O");
   for (size_t i = 0; i < hits.size(); i++) {
     const SimHit &h = hits[i];
     channel = h.channel;
@@ -98,17 +99,27 @@ Bool_t Write(const Config &cfg, const EventGenerator &events,
     prevTrueAmp = h.prevTrueAmp;
     pileup = h.pileup;
     eventIndex = h.eventIndex;
+    reaction = h.reaction;
     tree->Fill();
   }
   tree->Write();
 
+  // amp is the beam particle's amplitude; ampL and ampR what the two long ends
+  // received, which differ from it only for a reacted particle.
   TTree *truth = new TTree("truth", "True beam particles");
-  Double_t time_ns = 0.0, amp = 0.0;
+  Double_t time_ns = 0.0, amp = 0.0, ampL = 0.0, ampR = 0.0;
+  Bool_t reacted = kFALSE;
   truth->Branch("time_ns", &time_ns, "time_ns/D");
   truth->Branch("amp", &amp, "amp/D");
+  truth->Branch("ampL", &ampL, "ampL/D");
+  truth->Branch("ampR", &ampR, "ampR/D");
+  truth->Branch("reacted", &reacted, "reacted/O");
   for (Long64_t i = 0; i < events.NEvents(); i++) {
     time_ns = events.Time_ns(i);
     amp = events.Amplitude(i);
+    ampL = events.ChannelAmplitude(i, 0);
+    ampR = events.ChannelAmplitude(i, 1);
+    reacted = events.Reacted(i);
     truth->Fill();
   }
   truth->Write();
@@ -126,6 +137,7 @@ Bool_t Write(const Config &cfg, const EventGenerator &events,
   WriteParameter("baselineMeanSamples", Double_t(cfg.baselineMeanSamples));
   WriteParameter("baselineHoldoff_ns", cfg.baselineHoldoff_ns);
   WriteParameter("nEvents", Double_t(cfg.nEvents));
+  WriteParameter("reactionFraction", cfg.reactionFraction);
 
   WriteSnippet(left, "L");
   WriteSnippet(right, "R");
@@ -167,7 +179,7 @@ Bool_t Read(const TString &path, RunHeader &header,
   ULong64_t timestamp = 0;
   Double_t energy = 0.0, dtPrev = 0.0, dtNext = 0.0, trueAmp = 0.0,
            prevTrueAmp = 0.0;
-  Bool_t pileup = kFALSE;
+  Bool_t pileup = kFALSE, reaction = kFALSE;
   Long64_t eventIndex = 0;
   tree->SetBranchAddress("channel", &channel);
   tree->SetBranchAddress("timestamp", &timestamp);
@@ -178,6 +190,9 @@ Bool_t Read(const TString &path, RunHeader &header,
   tree->SetBranchAddress("prevTrueAmp", &prevTrueAmp);
   tree->SetBranchAddress("pileup", &pileup);
   tree->SetBranchAddress("eventIndex", &eventIndex);
+  // Runs written before reactions were simulated have no reaction branch.
+  if (tree->GetBranch("reaction"))
+    tree->SetBranchAddress("reaction", &reaction);
   const Long64_t n = tree->GetEntries();
   hits.clear();
   hits.reserve(n);
@@ -193,6 +208,7 @@ Bool_t Read(const TString &path, RunHeader &header,
     h.prevTrueAmp = prevTrueAmp;
     h.pileup = pileup;
     h.eventIndex = eventIndex;
+    h.reaction = reaction;
     hits.push_back(h);
   }
   f->Close();

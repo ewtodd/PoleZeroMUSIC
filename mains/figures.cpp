@@ -94,33 +94,25 @@ struct Spread {
 typedef std::map<Double_t, Spread> RateSpreads;
 typedef std::map<TString, RateSpreads> ReadingSpreads;
 
-// "=== <reading>_r<rate>: ..." blocks and their
-// "  L: ... RMS a -> corrected mean m RMS b ADC" lines.
-void ReadSpreads(const TString &log, ReadingSpreads &out) {
-  std::ifstream in(log.Data());
-  std::string line;
-  TString reading;
-  Double_t rate = -1.0;
-  while (std::getline(in, line)) {
-    TString text(line.c_str());
-    if (text.BeginsWith("=== ")) {
-      TString label = text(4, text.Index(":") - 4);
-      const Ssiz_t lastR = label.Last('r');
-      reading = label(0, lastR - 1);
-      rate = TString(label(lastR + 1, label.Length() - lastR - 1)).Atof();
-      continue;
-    }
-    const Int_t side = text.BeginsWith("  L: ")   ? 0
-                       : text.BeginsWith("  R: ") ? 1
-                                                  : -1;
-    if (side < 0 || rate < 0.0 || !text.Contains("corrected mean"))
-      continue;
-    const Ssiz_t first = text.Index(" RMS ");
-    const Ssiz_t second = text.Index(" RMS ", first + 5);
-    out[reading][rate].raw[side] = TString(text(first + 5, 10)).Atof();
-    out[reading][rate].corr[side] = TString(text(second + 5, 10)).Atof();
-  }
-}
+// The spread table's runs (scripts/spread_inputs.sh): three behaviours of the
+// baseline restorer, each at the isolated rate and the three table rates.
+struct SpreadReading {
+  const char *key;
+  const char *label;
+};
+const Int_t kNSpreadReadings = 3;
+const SpreadReading kSpreadReadings[kNSpreadReadings] = {
+    {"ideal", "never takes in the tail"},
+    {"wait", "frozen until within \\SI{80}{ADC}"},
+    {"follow", "restarts after the freeze"}};
+const Double_t kIsolatedRate = 0.5;
+const Int_t kNSpreadRates = 3;
+const Double_t kSpreadRates[kNSpreadRates] = {10.0, 44.0, 80.0};
+// The beam window of the former analyze program, in units of the beam peak:
+// wide enough for the pole-zero distortions, narrow enough to exclude the
+// merged double pulses at twice the peak.
+const Double_t kSpreadWindowLo = 0.5;
+const Double_t kSpreadWindowHi = 1.5;
 
 // ----------------------------------------------------------- shared drawing
 const Int_t kRightColour = kRed + 1;
@@ -530,8 +522,21 @@ void PileupPairFigure() {
             << std::endl;
 }
 
+// What the figures take from a simulated run's parameters.
+struct RunInfo {
+  Double_t beamPeak = 1600.0;
+  Double_t tauL_us = 0.0;
+  Double_t tauR_us = 0.0;
+  Double_t tauPz_us = 0.0;
+};
+
+Double_t RunParameter(TFile &file, const char *name, Double_t fallback) {
+  TParameter<Double_t> *parameter = (TParameter<Double_t> *)file.Get(name);
+  return parameter ? parameter->GetVal() : fallback;
+}
+
 Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits,
-                Double_t &beamPeak) {
+                RunInfo &info) {
   TFile in(path, "READ");
   if (in.IsZombie()) {
     std::cerr << "cannot open " << path << std::endl;
@@ -542,16 +547,16 @@ Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits,
     std::cerr << "no hits tree in " << path << std::endl;
     return kFALSE;
   }
-  beamPeak = 1600.0;
-  TParameter<Double_t> *peak = (TParameter<Double_t> *)in.Get("beamPeakADC");
-  if (peak)
-    beamPeak = peak->GetVal();
+  info.beamPeak = RunParameter(in, "beamPeakADC", 1600.0);
+  info.tauL_us = RunParameter(in, "tauL_us", 0.0);
+  info.tauR_us = RunParameter(in, "tauR_us", 0.0);
+  info.tauPz_us = RunParameter(in, "trapDecay_us", 0.0);
 
   Int_t channel = 0;
   ULong64_t timestamp = 0;
   Double_t energy = 0.0, dtPrev = 0.0, dtNext = 0.0, trueAmp = 0.0,
            prevTrueAmp = 0.0;
-  Bool_t pileup = kFALSE;
+  Bool_t pileup = kFALSE, reaction = kFALSE;
   Long64_t eventIndex = 0;
   tree->SetBranchAddress("channel", &channel);
   tree->SetBranchAddress("timestamp", &timestamp);
@@ -562,6 +567,9 @@ Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits,
   tree->SetBranchAddress("prevTrueAmp", &prevTrueAmp);
   tree->SetBranchAddress("pileup", &pileup);
   tree->SetBranchAddress("eventIndex", &eventIndex);
+  // Runs written before reactions were simulated have no reaction branch.
+  if (tree->GetBranch("reaction"))
+    tree->SetBranchAddress("reaction", &reaction);
   hits.clear();
   hits.reserve(size_t(tree->GetEntries()));
   for (Long64_t i = 0; i < tree->GetEntries(); i++) {
@@ -576,6 +584,7 @@ Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits,
     hit.prevTrueAmp = prevTrueAmp;
     hit.pileup = pileup;
     hit.eventIndex = eventIndex;
+    hit.reaction = reaction;
     hits.push_back(hit);
   }
   in.Close();
@@ -628,33 +637,89 @@ void DrawSpectrum(const std::vector<SimHit> &hits,
   delete canvas;
 }
 
+// The PulseHistory correction of one run, with the kernel measured on the run
+// itself by the unmodified MUSIC code.
+Bool_t CorrectRun(const std::vector<SimHit> &hits, const TString &label,
+                  std::vector<Double_t> &corrected) {
+  PulseHistoryAdapter::Adapted adapted = PulseHistoryAdapter::Build(hits);
+  std::vector<Int_t> groups = PulseHistory::BuildGroupMap();
+  PulseHistory::Result kernel;
+  if (!PulseHistory::Measure(adapted.hits, groups, kernel, label)) {
+    std::cerr << "PulseHistory::Measure failed for " << label << std::endl;
+    return kFALSE;
+  }
+  kernel.n_corrected = 0;
+  kernel.n_clamped = 0;
+  PulseHistory::Apply(adapted.hits, groups, kernel);
+  corrected = PulseHistoryAdapter::CorrectedEnergies(adapted, hits);
+  return kTRUE;
+}
+
 void SpectrumFigure(const TString &path, const TString &label) {
   std::vector<SimHit> hits;
-  Double_t beamPeak = 0.0;
-  if (!ReadHits(path, hits, beamPeak))
+  RunInfo info;
+  if (!ReadHits(path, hits, info))
     return;
 
   const char *panel = label == "1kHz" ? "(a)" : "(b)";
   std::vector<Double_t> raw(hits.size(), 0.0);
   for (Int_t i = 0; i < Int_t(hits.size()); i++)
     raw[i] = hits[i].energy;
-  DrawSpectrum(hits, raw, beamPeak, label,
+  DrawSpectrum(hits, raw, info.beamPeak, label,
                Form("spectrum_%s", label.Data()), panel);
 
-  PulseHistoryAdapter::Adapted adapted = PulseHistoryAdapter::Build(hits);
-  std::vector<Int_t> groups = PulseHistory::BuildGroupMap();
-  PulseHistory::Result kernel;
-  if (!PulseHistory::Measure(adapted.hits, groups, kernel, label)) {
-    std::cerr << "PulseHistory::Measure failed for " << path << std::endl;
+  std::vector<Double_t> corrected;
+  if (!CorrectRun(hits, label, corrected))
     return;
-  }
-  kernel.n_corrected = 0;
-  kernel.n_clamped = 0;
-  PulseHistory::Apply(adapted.hits, groups, kernel);
-  std::vector<Double_t> corrected =
-      PulseHistoryAdapter::CorrectedEnergies(adapted, hits);
-  DrawSpectrum(hits, corrected, beamPeak, label,
+  DrawSpectrum(hits, corrected, info.beamPeak, label,
                Form("spectrum_%s_corrected", label.Data()), panel);
+}
+
+// Standard deviation about the mean, the former analyze program's "RMS".
+Double_t Rms(const std::vector<Double_t> &values) {
+  if (values.empty())
+    return 0.0;
+  Double_t sum = 0.0, sum2 = 0.0;
+  for (size_t i = 0; i < values.size(); i++) {
+    sum += values[i];
+    sum2 += values[i] * values[i];
+  }
+  const Double_t mean = sum / Double_t(values.size());
+  const Double_t variance = sum2 / Double_t(values.size()) - mean * mean;
+  return variance > 0.0 ? TMath::Sqrt(variance) : 0.0;
+}
+
+// The spread of one run, raw and corrected, per chain: non-pileup pulse
+// heights within the beam window, as the former analyze program took them.
+Bool_t MeasureSpread(const TString &path, const TString &label, Spread &spread,
+                     RunInfo &info) {
+  std::vector<SimHit> hits;
+  if (!ReadHits(path, hits, info))
+    return kFALSE;
+  std::vector<Double_t> corrected;
+  if (!CorrectRun(hits, label, corrected))
+    return kFALSE;
+  const Double_t lo = kSpreadWindowLo * info.beamPeak;
+  const Double_t hi = kSpreadWindowHi * info.beamPeak;
+  std::vector<Double_t> raw[2], corr[2];
+  for (size_t i = 0; i < hits.size(); i++) {
+    const SimHit &hit = hits[i];
+    if (hit.pileup)
+      continue;
+    if (hit.energy > lo && hit.energy < hi)
+      raw[hit.channel].push_back(hit.energy);
+    if (corrected[i] > lo && corrected[i] < hi)
+      corr[hit.channel].push_back(corrected[i]);
+  }
+  for (Int_t ch = 0; ch < 2; ch++) {
+    spread.raw[ch] = Rms(raw[ch]);
+    spread.corr[ch] = Rms(corr[ch]);
+  }
+  std::cout << Form("spread %s: L %.1f -> %.1f, R %.1f -> %.1f ADC",
+                    label.Data(), spread.raw[0], spread.corr[0],
+                    spread.raw[1], spread.corr[1])
+            << std::endl;
+  return kTRUE;
 }
 
 // ----------------------------------------------------------- data figures
@@ -703,52 +768,44 @@ void KernelFigure(const std::vector<std::vector<Double_t>> &kernels) {
 }
 
 // The simulated rms spread of each baseline reading, before and after
-// correction, as a booktabs tabular for the paper to \input (needs siunitx).
-// The isolated column is the corrected spread at 0.5 kHz.
-void SpreadTable(const ReadingSpreads &spreads, const TString &path) {
-  struct Reading {
-    const char *key;
-    const char *label;
-  };
-  const std::vector<Reading> readings = {
-      {"ideal", "never takes in the tail"},
-      {"wait", "frozen until within \\SI{80}{ADC}"},
-      {"follow", "restarts after the freeze"}};
-  const Double_t isolatedRate = 0.5;
-  const std::vector<Double_t> rates = {10.0, 44.0, 80.0};
-
-  // A partial table would quietly replace the good one.
-  std::vector<Double_t> needed = rates;
-  needed.push_back(isolatedRate);
-  for (size_t j = 0; j < readings.size(); j++) {
-    ReadingSpreads::const_iterator reading = spreads.find(readings[j].key);
-    for (size_t i = 0; i < needed.size(); i++) {
-      if (reading == spreads.end() ||
-          reading->second.find(needed[i]) == reading->second.end()) {
-        std::cout << "skipping spread_table: no " << readings[j].key << " at "
-                  << needed[i] << " kHz" << std::endl;
-        return;
-      }
-    }
-  }
-
+// correction, as a complete booktabs table float with its caption and label
+// (tab:spread), for the paper to \input (needs siunitx and amsmath). The
+// isolated column is the corrected spread at the isolated rate. The caption's
+// decay times are those of the runs, which main checks agree; spreads holds
+// every reading at every rate.
+void SpreadTable(const ReadingSpreads &spreads, const RunInfo &runs,
+                 const TString &path) {
   std::ofstream table(path.Data());
   table << "% Written by mains/figures.cpp; edit that, not this file."
         << std::endl;
-  // Scoped by the table the paper inputs this into; without them the tabular
-  // overflows the text width of the elsarticle preprint.
+  table << "\\begin{table}[htb]" << std::endl;
+  table << "\\centering" << std::endl;
+  table << Form("\\caption{Simulated rms pulse-height spread, in ADC, of "
+                "pulses within 0.5--1.5 times the beam peak with no neighbour "
+                "within \\SI{5}{\\micro\\second}, before and after correction, "
+                "and for isolated pulses (\\SI{0.5}{\\kilo\\hertz}), for three "
+                "behaviours of the baseline restorer. The runs used "
+                "$\\tau_{\\text{pre}} = \\SI{%g}{\\micro\\second}$ on the "
+                "right segments and \\SI{%g}{\\micro\\second} on the left, "
+                "with $\\tau_{\\text{pz}} = \\SI{%g}{\\micro\\second}$.}",
+                runs.tauR_us, runs.tauL_us, runs.tauPz_us)
+        << std::endl;
+  table << "\\label{tab:spread}" << std::endl;
+  // Scoped by the table; without them the tabular overflows the text width of
+  // the elsarticle preprint.
   table << "\\small" << std::endl;
   table << "\\setlength{\\tabcolsep}{4pt}" << std::endl;
   table << "\\begin{tabular}{@{}lccccccc@{}}" << std::endl;
   table << "\\toprule" << std::endl;
   table << "&";
-  for (size_t i = 0; i < rates.size(); i++)
-    table << Form(" & \\multicolumn{2}{c}{\\SI{%.0f}{\\kilo\\hertz}}", rates[i]);
+  for (Int_t i = 0; i < kNSpreadRates; i++)
+    table << Form(" & \\multicolumn{2}{c}{\\SI{%.0f}{\\kilo\\hertz}}",
+                  kSpreadRates[i]);
   table << " \\\\" << std::endl;
   table << "\\cmidrule(lr){3-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-8}"
         << std::endl;
   table << "Baseline & isolated";
-  for (size_t i = 0; i < rates.size(); i++)
+  for (Int_t i = 0; i < kNSpreadRates; i++)
     table << " & before & after";
   table << " \\\\" << std::endl;
 
@@ -760,12 +817,13 @@ void SpreadTable(const ReadingSpreads &spreads, const TString &path) {
     table << "\\midrule" << std::endl;
     table << "\\multicolumn{8}{l}{\\textit{" << sideNames[s] << "}} \\\\"
           << std::endl;
-    for (size_t j = 0; j < readings.size(); j++) {
-      const RateSpreads &byRate = spreads.find(readings[j].key)->second;
-      table << readings[j].label
-            << Form(" & %.1f", byRate.find(isolatedRate)->second.corr[sides[s]]);
-      for (size_t i = 0; i < rates.size(); i++) {
-        const Spread &spread = byRate.find(rates[i])->second;
+    for (Int_t j = 0; j < kNSpreadReadings; j++) {
+      const RateSpreads &byRate = spreads.find(kSpreadReadings[j].key)->second;
+      table << kSpreadReadings[j].label
+            << Form(" & %.1f",
+                    byRate.find(kIsolatedRate)->second.corr[sides[s]]);
+      for (Int_t i = 0; i < kNSpreadRates; i++) {
+        const Spread &spread = byRate.find(kSpreadRates[i])->second;
         table << Form(" & %.1f & %.1f", spread.raw[sides[s]],
                       spread.corr[sides[s]]);
       }
@@ -774,6 +832,7 @@ void SpreadTable(const ReadingSpreads &spreads, const TString &path) {
   }
   table << "\\bottomrule" << std::endl;
   table << "\\end{tabular}" << std::endl;
+  table << "\\end{table}" << std::endl;
   std::cout << "wrote " << path << std::endl;
 }
 
@@ -866,7 +925,7 @@ int main(int argc, char **argv) {
   TString out = "doc/figs", run = "run97_c000";
   TString log = TString(gSystem->HomeDirectory()) +
                 "/MUSIC/analysis/37Cl/pipeline_fused.log";
-  TString sims = "output/paper_sim/analysis.log";
+  TString spreadDir = "output/spread";
   TString run97 = "output/run97/deviation.root";
   TString long1 = "output/figures/long_1kHz.root";
   TString long40 = "output/figures/long_40kHz.root";
@@ -879,8 +938,8 @@ int main(int argc, char **argv) {
       log = argument(6, argument.Length() - 6);
     else if (argument.BeginsWith("--run="))
       run = argument(6, argument.Length() - 6);
-    else if (argument.BeginsWith("--sim="))
-      sims = argument(6, argument.Length() - 6);
+    else if (argument.BeginsWith("--spread="))
+      spreadDir = argument(9, argument.Length() - 9);
     else if (argument.BeginsWith("--run97="))
       run97 = argument(8, argument.Length() - 8);
     else if (argument.BeginsWith("--long1="))
@@ -913,19 +972,45 @@ int main(int argc, char **argv) {
     }
   }
 
-  ReadingSpreads spreads;
-  Bool_t haveSims = kTRUE;
-  TObjArray *files = sims.Tokenize(",");
-  for (Int_t i = 0; i < files->GetEntries(); i++) {
-    const TString file = ((TObjString *)files->At(i))->GetString();
-    if (HaveInput(file, "spread_table"))
-      ReadSpreads(file, spreads);
-    else
-      haveSims = kFALSE;
+  if (format != PlotSaveFormat::kPNG) {
+    std::vector<TString> spreadFiles, spreadLabels;
+    std::vector<Double_t> allRates(1, kIsolatedRate);
+    for (Int_t i = 0; i < kNSpreadRates; i++)
+      allRates.push_back(kSpreadRates[i]);
+    Bool_t haveSpreads = kTRUE;
+    for (Int_t j = 0; j < kNSpreadReadings && haveSpreads; j++) {
+      for (size_t i = 0; i < allRates.size() && haveSpreads; i++) {
+        const TString label =
+            Form("%s_r%g", kSpreadReadings[j].key, allRates[i]);
+        spreadLabels.push_back(label);
+        spreadFiles.push_back(spreadDir + "/" + label + ".root");
+        haveSpreads = HaveInput(spreadFiles.back(), "spread_table");
+      }
+    }
+    ReadingSpreads spreads;
+    RunInfo runs;
+    for (Int_t j = 0; j < kNSpreadReadings && haveSpreads; j++) {
+      for (size_t i = 0; i < allRates.size() && haveSpreads; i++) {
+        const size_t n = j * allRates.size() + i;
+        RunInfo info;
+        haveSpreads = MeasureSpread(spreadFiles[n], spreadLabels[n],
+                                    spreads[kSpreadReadings[j].key][allRates[i]],
+                                    info);
+        if (n == 0)
+          runs = info;
+        else if (info.tauL_us != runs.tauL_us ||
+                 info.tauR_us != runs.tauR_us ||
+                 info.tauPz_us != runs.tauPz_us) {
+          std::cout << "skipping spread_table: " << spreadFiles[n]
+                    << " has other decay times than " << spreadFiles[0]
+                    << std::endl;
+          haveSpreads = kFALSE;
+        }
+      }
+    }
+    if (haveSpreads)
+      SpreadTable(spreads, runs, out + "/spread_table.tex");
   }
-  delete files;
-  if (haveSims && format != PlotSaveFormat::kPNG)
-    SpreadTable(spreads, out + "/spread_table.tex");
 
   if (HaveInput(run97, "run97_deviation_R"))
     DeviationFigure(run97);

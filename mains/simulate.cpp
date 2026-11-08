@@ -35,7 +35,8 @@ int main(int argc, char **argv) {
 
   std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
   EventGenerator events(cfg);
-  events.Generate();
+  if (!events.Generate())
+    return 1;
   std::cout << "Generated " << events.NEvents() << " beam particles over "
             << (events.Time_ns(events.NEvents() - 1) - events.Time_ns(0)) *
                    1.0e-9
