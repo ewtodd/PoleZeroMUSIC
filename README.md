@@ -1,8 +1,9 @@
 # MUSIC pole-zero figures
 
-`figures` draws the figures and the spread table of the pole-zero paper: the
+`figures` draws the figures and writes the tables of the pole-zero paper: the
 filter responses, the two-pulse baseline figure, the rate-dependent
-pulse-height spectra and the run-97 results. `simulate` makes the hits the
+pulse-height spectra, the spread, reaction and amplitude-band tables, and the
+run-97 results. `simulate` makes the hits the
 spectra read. The inputs are simulated filter responses, simulated hits, and
 the outputs of the 37Cl analysis.
 
@@ -26,9 +27,8 @@ pinned `music` flake input. To build against a local checkout, use
 need it updated first.
 
 ```
-figures [--log=<pipeline_fused.log>] [--run=run97_c000]
-        [--spread=<dir>]
-        [--run97=<deviation.root>]
+figures [--spread=<dir>] [--reactions=<dir>]
+        [--run97=<run97.root>]
         [--long1=<long_1kHz.root>] [--long40=<long_40kHz.root>]
         [--out=doc/figs] [--format=pdf|png]
 ```
@@ -37,9 +37,9 @@ With no arguments it reads
 
 | Option | Default | Contains |
 |---|---|---|
-| `--log` | `~/MUSIC/analysis/37Cl/pipeline_fused.log` | the `kernel:` lines of the 37Cl pipeline |
 | `--spread` | `output/spread` | the spread-table runs, `<reading>_r<rate>.root` |
-| `--run97` | `output/run97/deviation.root` | run 97's `before_long_right` and `after_long_right` profiles |
+| `--reactions` | `output/reactions` | the reaction-table runs, `<reading>_r<rate>.root` |
+| `--run97` | `output/run97/run97.root` | what `scripts/run97_figure.sh` measures on run 97: the kernels, the before/after profiles, the strip spectra and their FWHM, and the band spreads |
 | `--long1` | `output/figures/long_1kHz.root` | the 1 kHz simulated hits, left matched, right mismatched |
 | `--long40` | `output/figures/long_40kHz.root` | the 40 kHz simulated hits, left matched, right mismatched |
 
@@ -56,9 +56,13 @@ both, with the PNGs moved to `<out>/png/`.
 | `pileup_pair` | a second pulse inside the baseline freeze, with the loss at its read point |
 | `spectrum_1kHz` / `spectrum_40kHz` | raw pulse-height spectra at the two rates, matched left against mismatched right |
 | `spectrum_1kHz_corrected` / `spectrum_40kHz_corrected` | the same spectra after the PulseHistory correction |
+| `spread_table.tex` | a complete table float, not a figure, with its caption and the label `tab:spread`: rms spread before and after correction at 10, 44 and 80 kHz for the two baseline readings (ideal, and the conditional restart of the firmware with `EnergyFilterLFLimitation` on), for the paper to `\input` (needs `siunitx`, `booktabs` and `amsmath`) |
+| `reaction_table.tex` | a table float like `spread_table.tex`, label `tab:reactions`: spread about the true amplitude, before and after correction, for beam particles, reacted particles and beam particles right after a reacted one |
 | `kernel_run97` | the long-left, long-right and short-left kernels fitted on run 97 |
-| `spread_table.tex` | a complete table float, not a figure, with its caption and the label `tab:spread`: rms spread before and after correction at 10, 44 and 80 kHz for the three baseline readings, for the paper to `\input` (needs `siunitx`, `booktabs` and `amsmath`) |
 | `run97_deviation_R` | run 97 long-right profile before and after correction |
+| `run97_spectra` / `run97_spectra_corrected` | run 97's strip DeltaE spectra (the segmented strips S1-S16, each in units of its beam peak) before and after the correction, as MUSIC's events summary draws them |
+| `run97_fwhm.tex` | LaTeX macros for the text, not a float: the strips' beam-peak FWHM in percent of the peak, before and after the correction, for the strips whose long segment the right chain reads (`\FwhmLongRightBefore`, `\FwhmLongRightAfter`) and those whose long segment the left chain reads (`\FwhmLongLeft...`), each the mean over those strips, with `Min`/`Max` variants for the narrowest and widest |
+| `band_table.tex` | a table float like `spread_table.tex`, label `tab:bands`: the spread before correction and after it with one kernel and with four amplitude bands, for the runs of the spread table and for run 97, in percent of the beam peak |
 
 The filter-response figures use unit-amplitude pulses, so their vertical
 scales are in arbitrary units. They use the DPP-PHA settings of the 37Cl runs
@@ -72,7 +76,7 @@ inputs with the left chain at `tauL = 20 us`, matched to the 20 us pole-zero.
 `spread_table.tex` gives the rms of non-pileup pulses within 0.5-1.5 times the
 beam peak; its isolated column is the corrected rms at 0.5 kHz. Each run
 measures its own PulseHistory kernel, as the spectra do.
-`scripts/spread_inputs.sh` makes the runs: three baseline behaviours at 0.5,
+`scripts/spread_inputs.sh` makes the runs: two baseline behaviours at 0.5,
 10, 44 and 80 kHz, with `tauR = 10 us` and `tauL = 25 us`. The caption takes
 the decay times from the runs.
 
@@ -84,13 +88,39 @@ long-left / long-right neighbour pair at or after the reaction, as ratios to
 the unreacted beam there, weighted by the TALYS cross sections. The physical
 rate is about 2e-5 per beam particle; the 1 % is for statistics. Reactions
 draw from their own random stream, so the beam is event for event that of the
-reaction-free runs of `scripts/spread_inputs.sh`. No figure uses these runs
-yet.
+reaction-free runs of `scripts/spread_inputs.sh`. `reaction_table.tex` scores
+these runs against truth: the spread of each height about its chain's gain
+times the true amplitude, the gain taken from the beam particles. Only
+particles with no other particle, recorded or not, within 5 us enter; the
+pileup flag knows only recorded triggers, so it lets merged double pulses
+through.
+
+`band_table.tex` compares the production kernel, one per channel group, with
+one kernel per band of the previous pulse height (`PULSE_HISTORY_AMP_BINS =
+4`: below 0.5, 0.5-1.5, 1.5-2.5 and above 2.5 times the beam peak). Its
+simulated rows correct the spread table's runs again with four
+bands; its run-97 row comes from `run97.root`. Both use the spread table's
+measure, in percent of the beam peak, so they read side by side.
 
 ## Run-97 input
 
-`scripts/run97_figure.sh` builds `output/run97/deviation.root` with the local
-MUSIC tooling and then redraws the figures:
+`scripts/run97_figure.sh` builds `output/run97/run97.root` with the local
+MUSIC tooling and then redraws the figures. It runs PulseHistory on the first
+run-97 file and keeps the group kernels it fits, the before/after profiles and
+the strip spectra. Those are built as in MUSIC's events summary: events seeded
+on the grid within the event window, strips 1-16 summing their two ends, each
+strip in units of its own beam peak, before and after the correction. The
+kernels do not come from the 37Cl pipeline log, so they follow the pinned
+PulseHistory even before that pipeline is rerun.
+
+It also keeps each strip's beam-peak FWHM, taken from the per-event values
+(0.2 % bins smoothed over 1 %, not the spectra's 0.02 a.u. bins), and which
+chain reads each strip's long segment, for `run97_fwhm.tex`. For
+`band_table.tex` it corrects the file a second time with four amplitude
+bands. It then keeps the long groups' spread before correction, with one band
+and with four bands: hits with no other hit on the same channel within 5 us,
+within 0.5-1.5 times the channel's beam peak, in percent of that peak. It
+also keeps the long ends' mean trigger rate.
 
 ```
 bash scripts/run97_figure.sh

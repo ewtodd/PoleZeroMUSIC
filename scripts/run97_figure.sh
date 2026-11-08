@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# The run-97 pulse-height-vs-gap figure of the paper, before and after the
-# pulse-history correction, as PDF (doc/figs) and PNG (doc/figs/png).
-# Runs PulseHistory with the 37Cl configuration on the first run-97 file
-# (about 2 GB of memory), built against the local ~/MUSIC tooling, as
-# production is, and keeps its profiles in output/run97/deviation.root for
-# figures to draw.
+# The run-97 figures of the paper, as PDF (doc/figs) and PNG (doc/figs/png):
+# the kernels PulseHistory fits, the pulse height against the time since the
+# previous pulse, and the strip spectra, the last two before and after the
+# correction; and run 97's part of the tables: the strips' beam-peak FWHM
+# (run97_fwhm.tex) and the run-97 row of band_table.tex. Runs PulseHistory
+# with the 37Cl configuration on the first run-97 file (about 2 GB of memory),
+# built against the local ~/MUSIC tooling, as production is, once as
+# production does and once with four amplitude bands, and keeps what it
+# measures in output/run97/run97.root for figures to draw.
 # Run from the project root:  bash scripts/run97_figure.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -24,6 +27,6 @@ nix develop -c bash -c '
     "$MUSIC/tooling/src/PulseHistory.cpp" "$MUSIC/tooling/src/Constants.cpp" \
     "$MUSIC/tooling/src/Plots.cpp" \
     $(root-config --glibs) -lMinuit -lanalysis-utils -o "$WORK/run97_pulse_history"
-  "$WORK/run97_pulse_history" "$OUT/deviation.root" run97_c000 "$SOL" > "$WORK/run.log"
-  ./result/bin/figures --run97="$OUT/deviation.root" 2>&1 | { grep -v "^Info in" || true; }'
+  "$WORK/run97_pulse_history" "$OUT/run97.root" run97_c000 "$SOL" > "$WORK/run.log"
+  ./result/bin/figures --run97="$OUT/run97.root" 2>&1 | { grep -v "^Info in" || true; }'
 grep -E "long R|long L|short L" "$WORK/run.log" | head -3

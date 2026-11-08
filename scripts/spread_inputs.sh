@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Regenerate the simulated runs behind doc/figs/spread_table.tex: three
+# Regenerate the simulated runs behind doc/figs/spread_table.tex: two
 # behaviours of the baseline restorer, each at 0.5 (isolated pulses), 10, 44
 # and 80 kHz, with the preamplifier decay times of the spec (tauR = 10 us,
 # tauL = 25 us) against the 20 us pole-zero. figures takes the decay times for
 # the table's caption from these runs.
-#   ideal  - the true baseline is subtracted (never takes in the tail)
-#   wait   - frozen until the trapezoid stays within 80 ADC for 2 us
-#   follow - averaging restarts as soon as the 7 us freeze ends
+#   ideal - the true baseline is subtracted
+#   wait  - conditional restart, the firmware's with EnergyFilterLFLimitation
+#           on, as in the 37Cl runs: after the 7 us freeze, averaging resumes
+#           only once the trapezoid has stayed within 80 ADC for 2 us
 # Run from anywhere: bash scripts/spread_inputs.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -18,9 +19,8 @@ nix build
 declare -A CASE=(
   [ideal]="--baselineIdeal=on"
   [wait]="--lfFilterOn=off --baselineRestartThrADC=80"
-  [follow]="--lfFilterOn=off --baselineRestartThrADC=0"
 )
-for reading in ideal wait follow; do
+for reading in ideal wait; do
   for rate in 0.5 10 44 80; do
     n=$N
     # Without the smoothing a waiting baseline is rebuilt from 500 us before

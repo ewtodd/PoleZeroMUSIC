@@ -1,3 +1,4 @@
+#include "Constants.hpp"
 #include "InitUtils.hpp"
 #include "PlottingUtils.hpp"
 #include "Preamp.hpp"
@@ -24,11 +25,18 @@
 #include <TString.h>
 #include <TSystem.h>
 #include <TTree.h>
+#include <TVectorD.h>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
 #include <vector>
+
+// src/SimDatasetConfig.cpp: the kernel's amplitude bands, read by
+// PulseHistory on every Measure.
+namespace Constants {
+void SetSimPulseHistoryAmpBins(Int_t n);
+} // namespace Constants
 
 namespace {
 
@@ -48,34 +56,23 @@ Int_t Samples(Double_t ns) { return Int_t(TMath::Nint(ns / kSamplePeriodNs)); }
 Double_t BinCentre(Int_t i) { return TMath::Power(10.0, (i + 0.5) / 12.0); }
 
 // ----------------------------------------------------------- input parsing
-std::vector<std::vector<Double_t>> ReadKernels(const TString &log,
-                                               const TString &run) {
+// The group kernels scripts/run97_figure.sh saves (long left, long right,
+// short left), each the shift per unit previous pulse height in kNBins bins;
+// empty if the file has none.
+std::vector<std::vector<Double_t>> ReadKernels(const TString &file) {
   std::vector<std::vector<Double_t>> kernels;
-  std::ifstream in(log.Data());
-  std::string line;
-  Bool_t inRun = kFALSE;
-  while (std::getline(in, line)) {
-    TString text(line.c_str());
-    if (text.Contains("pulse history ")) {
-      if (inRun)
-        break;
-      inRun = text.Contains(Form("pulse history %s:", run.Data()));
-      continue;
-    }
-    if (!inRun || !text.Contains("kernel:"))
-      continue;
-    std::vector<Double_t> values;
-    TObjArray *tokens = text.Tokenize(" ");
-    for (Int_t i = 0; i < tokens->GetEntries(); i++) {
-      TString token = ((TObjString *)tokens->At(i))->GetString();
-      const Ssiz_t col = token.Index("us:");
-      if (col > 0)
-        values.push_back(
-            TString(token(col + 3, token.Length() - col - 3)).Atof());
-    }
-    delete tokens;
-    if (Int_t(values.size()) == kNBins)
-      kernels.push_back(values);
+  TFile in(file, "READ");
+  const Int_t nGroups = 3;
+  const char *names[nGroups] = {"kernel_long_left", "kernel_long_right",
+                                "kernel_short_left"};
+  for (Int_t i = 0; i < nGroups; i++) {
+    const TVectorD *values = (const TVectorD *)in.Get(names[i]);
+    if (!values || values->GetNrows() != kNBins)
+      return std::vector<std::vector<Double_t>>();
+    std::vector<Double_t> kernel(kNBins);
+    for (Int_t b = 0; b < kNBins; b++)
+      kernel[b] = (*values)[b];
+    kernels.push_back(kernel);
   }
   return kernels;
 }
@@ -94,17 +91,25 @@ struct Spread {
 typedef std::map<Double_t, Spread> RateSpreads;
 typedef std::map<TString, RateSpreads> ReadingSpreads;
 
-// The spread table's runs (scripts/spread_inputs.sh): three behaviours of the
+// The spread table's runs (scripts/spread_inputs.sh): two behaviours of the
 // baseline restorer, each at the isolated rate and the three table rates.
+// Ideal subtracts the true baseline. Conditional restart is the firmware's
+// with EnergyFilterLFLimitation on, as on every channel of the 37Cl runs
+// (data_raw/music_exp1915_097XSetting_66222.dat): after the freeze, averaging
+// resumes only once the trapezoid is back near the baseline. CAEN does not say
+// how near. The simulation uses 80 ADC held for 2 us, its default; at
+// tauR = 10 us, run 97 favours an earlier restart, about 40 ADC for 1 us.
 struct SpreadReading {
   const char *key;
   const char *label;
 };
-const Int_t kNSpreadReadings = 3;
+const Int_t kNSpreadReadings = 2;
 const SpreadReading kSpreadReadings[kNSpreadReadings] = {
-    {"ideal", "never takes in the tail"},
-    {"wait", "frozen until within \\SI{80}{ADC}"},
-    {"follow", "restarts after the freeze"}};
+    {"ideal", "ideal"}, {"wait", "conditional restart"}};
+// The conditional restart as scripts/spread_inputs.sh simulates it
+// (--baselineRestartThrADC=80 and the default 250-sample hold).
+const Double_t kRestartThrADC = 80.0;
+const Double_t kRestartHoldUs = 2.0;
 const Double_t kIsolatedRate = 0.5;
 const Int_t kNSpreadRates = 3;
 const Double_t kSpreadRates[kNSpreadRates] = {10.0, 44.0, 80.0};
@@ -129,13 +134,15 @@ TH1F *Frame(TVirtualPad *pad, Double_t x1, Double_t y1, Double_t x2,
   return frame;
 }
 
-// A legend inside the frame, sized to its labels and anchored on the right
-// (or the left) edge.
+// A legend inside the frame, sized to its labels and anchored a small inset
+// from the frame's right (or left) edge, wherever the pad's margins put it.
 TLegend *Legend(const std::vector<TString> &labels, Double_t y1, Double_t y2,
                 const TString &header = "", Bool_t left = kFALSE) {
   const Double_t width =
       PlottingUtils::LegendWidthPx(labels, header) / gPad->GetWw();
-  const Double_t x2 = left ? 0.17 + width : 0.88;
+  const Double_t inset = 0.02;
+  const Double_t x2 = left ? gPad->GetLeftMargin() + inset + width
+                           : 1.0 - gPad->GetRightMargin() - inset;
   TLegend *legend = PlottingUtils::AddLegend(x2 - width, x2, y1, y2);
   legend->SetFillStyle(1001);
   if (!header.IsNull())
@@ -535,8 +542,7 @@ Double_t RunParameter(TFile &file, const char *name, Double_t fallback) {
   return parameter ? parameter->GetVal() : fallback;
 }
 
-Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits,
-                RunInfo &info) {
+Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits, RunInfo &info) {
   TFile in(path, "READ");
   if (in.IsZombie()) {
     std::cerr << "cannot open " << path << std::endl;
@@ -691,13 +697,19 @@ Double_t Rms(const std::vector<Double_t> &values) {
 
 // The spread of one run, raw and corrected, per chain: non-pileup pulse
 // heights within the beam window, as the former analyze program took them.
+// The correction fits one kernel per band of the previous pulse height
+// (PULSE_HISTORY_AMP_BINS); production uses one.
 Bool_t MeasureSpread(const TString &path, const TString &label, Spread &spread,
-                     RunInfo &info) {
+                     RunInfo &info, Int_t bands = 1) {
   std::vector<SimHit> hits;
   if (!ReadHits(path, hits, info))
     return kFALSE;
+  const Int_t productionBands = Constants::cfg.PULSE_HISTORY_AMP_BINS;
+  Constants::SetSimPulseHistoryAmpBins(bands);
   std::vector<Double_t> corrected;
-  if (!CorrectRun(hits, label, corrected))
+  const Bool_t ok = CorrectRun(hits, label, corrected);
+  Constants::SetSimPulseHistoryAmpBins(productionBands);
+  if (!ok)
     return kFALSE;
   const Double_t lo = kSpreadWindowLo * info.beamPeak;
   const Double_t hi = kSpreadWindowHi * info.beamPeak;
@@ -716,8 +728,8 @@ Bool_t MeasureSpread(const TString &path, const TString &label, Spread &spread,
     spread.corr[ch] = Rms(corr[ch]);
   }
   std::cout << Form("spread %s: L %.1f -> %.1f, R %.1f -> %.1f ADC",
-                    label.Data(), spread.raw[0], spread.corr[0],
-                    spread.raw[1], spread.corr[1])
+                    label.Data(), spread.raw[0], spread.corr[0], spread.raw[1],
+                    spread.corr[1])
             << std::endl;
   return kTRUE;
 }
@@ -732,9 +744,8 @@ void KernelFigure(const std::vector<std::vector<Double_t>> &kernels) {
   const Double_t xLo = 1.0, xHi = 350.0, yLo = -0.2, yHi = 0.75;
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   canvas->SetLogx();
-  TH1F *frame = Frame(canvas, xLo, yLo, xHi, yHi,
-                      "Time Between Pulses #Delta#it{t} [#mus]",
-                      "Shift / Previous Pulse Height");
+  TH1F *frame = Frame(canvas, xLo, yLo, xHi, yHi, "Time Between Pulses [#mus]",
+                      "Shift / Earlier Pulse Height");
   frame->GetXaxis()->SetMoreLogLabels();
   frame->GetXaxis()->SetNoExponent();
 
@@ -778,16 +789,24 @@ void SpreadTable(const ReadingSpreads &spreads, const RunInfo &runs,
   std::ofstream table(path.Data());
   table << "% Written by mains/figures.cpp; edit that, not this file."
         << std::endl;
-  table << "\\begin{table}[htb]" << std::endl;
+  table << "\\begin{table}[htbp]" << std::endl;
   table << "\\centering" << std::endl;
   table << Form("\\caption{Simulated rms pulse-height spread, in ADC, of "
                 "pulses within 0.5--1.5 times the beam peak with no neighbour "
                 "within \\SI{5}{\\micro\\second}, before and after correction, "
-                "and for isolated pulses (\\SI{0.5}{\\kilo\\hertz}), for three "
-                "behaviours of the baseline restorer. The runs used "
+                "and for isolated pulses (\\SI{0.5}{\\kilo\\hertz}), for two "
+                "behaviours of the baseline restorer: ideal, the true "
+                "baseline is subtracted; and conditional restart, the "
+                "firmware's with its LF limitation on, as in the $^{37}$Cl "
+                "runs, in which averaging resumes after the "
+                "\\SI{%g}{\\micro\\second} freeze only once the trapezoid is "
+                "back near the baseline, simulated as within \\SI{%g}{ADC} "
+                "for \\SI{%g}{\\micro\\second}. The runs used "
                 "$\\tau_{\\text{pre}} = \\SI{%g}{\\micro\\second}$ on the "
-                "right segments and \\SI{%g}{\\micro\\second} on the left, "
-                "with $\\tau_{\\text{pz}} = \\SI{%g}{\\micro\\second}$.}",
+                "Long Strips, Right and \\SI{%g}{\\micro\\second} on the Long "
+                "Strips, Left, with $\\tau_{\\text{pz}} = "
+                "\\SI{%g}{\\micro\\second}$.}",
+                kBaselineHoldoffNs / 1000.0, kRestartThrADC, kRestartHoldUs,
                 runs.tauR_us, runs.tauL_us, runs.tauPz_us)
         << std::endl;
   table << "\\label{tab:spread}" << std::endl;
@@ -811,8 +830,7 @@ void SpreadTable(const ReadingSpreads &spreads, const RunInfo &runs,
 
   const Int_t nSides = 2;
   const Int_t sides[nSides] = {1, 0};
-  const char *sideNames[nSides] = {"Long right segments",
-                                   "Long left segments"};
+  const char *sideNames[nSides] = {"Long Strips, Right", "Long Strips, Left"};
   for (Int_t s = 0; s < nSides; s++) {
     table << "\\midrule" << std::endl;
     table << "\\multicolumn{8}{l}{\\textit{" << sideNames[s] << "}} \\\\"
@@ -836,10 +854,396 @@ void SpreadTable(const ReadingSpreads &spreads, const RunInfo &runs,
   std::cout << "wrote " << path << std::endl;
 }
 
-TGraphErrors *ProfileGraph(const TProfile *profile) {
+// The runs of scripts/reaction_inputs.sh that the reaction table shows.
+struct ReactionRun {
+  const char *key;
+  Double_t rate_kHz;
+};
+const Int_t kNReactionRuns = 3;
+const ReactionRun kReactionRuns[kNReactionRuns] = {
+    {"ideal", 44.0}, {"ideal", 80.0}, {"wait", 80.0}};
+// Beam particles, reacted ones, and beam particles whose previous pulse on the
+// same end was a reacted one.
+const Int_t kNReactionClasses = 3;
+
+// Spread of the height about the chain's gain times the true amplitude, in
+// ADC, before (raw) and after (corr) correction: [chain][class].
+struct ReactionScore {
+  Double_t raw[2][kNReactionClasses];
+  Double_t corr[2][kNReactionClasses];
+};
+
+Double_t SpreadOf(Double_t n, Double_t sum, Double_t sum2) {
+  if (!(n > 0.0))
+    return 0.0;
+  const Double_t mean = sum / n;
+  return TMath::Sqrt(TMath::Max(0.0, sum2 / n - mean * mean));
+}
+
+const char *ReadingLabel(const char *key) {
+  for (Int_t j = 0; j < kNSpreadReadings; j++)
+    if (TString(kSpreadReadings[j].key) == key)
+      return kSpreadReadings[j].label;
+  return key;
+}
+
+// The correction of one reaction run against truth. Only particles with no
+// other particle, recorded or not, within the trapezoid's rise and flat top
+// enter: the pileup flag knows only recorded triggers, and a particle lost in
+// the trigger holdoff merges into the one before. The gains come from the
+// beam particles.
+Bool_t ScoreReactions(const TString &path, const TString &label,
+                      ReactionScore &score, RunInfo &info, Double_t &fraction) {
+  std::vector<SimHit> hits;
+  if (!ReadHits(path, hits, info))
+    return kFALSE;
+  std::vector<Double_t> times;
+  {
+    TFile in(path, "READ");
+    TTree *truth = (TTree *)in.Get("truth");
+    if (!truth) {
+      std::cerr << "no truth tree in " << path << std::endl;
+      return kFALSE;
+    }
+    Double_t time_ns = 0.0;
+    truth->SetBranchAddress("time_ns", &time_ns);
+    for (Long64_t e = 0; e < truth->GetEntries(); e++) {
+      truth->GetEntry(e);
+      times.push_back(time_ns);
+    }
+    fraction = RunParameter(in, "reactionFraction", 0.0);
+  }
+  std::vector<Double_t> corrected;
+  if (!CorrectRun(hits, label, corrected))
+    return kFALSE;
+
+  const Double_t isolation_ns = kTrapRiseNs + kTrapFlatNs;
+  std::vector<Bool_t> alone(hits.size(), kFALSE);
+  Double_t sumRaw[2] = {0.0, 0.0}, sumCorr[2] = {0.0, 0.0},
+           sumTrue[2] = {0.0, 0.0};
+  for (size_t i = 0; i < hits.size(); i++) {
+    const Long64_t e = hits[i].eventIndex;
+    alone[i] = (e == 0 || times[e] - times[e - 1] >= isolation_ns) &&
+               (e + 1 >= Long64_t(times.size()) ||
+                times[e + 1] - times[e] >= isolation_ns);
+    if (!alone[i] || hits[i].reaction)
+      continue;
+    sumRaw[hits[i].channel] += hits[i].energy;
+    sumCorr[hits[i].channel] += corrected[i];
+    sumTrue[hits[i].channel] += hits[i].trueAmp;
+  }
+  Double_t n[2][kNReactionClasses] = {{0.0}};
+  Double_t sum[2][kNReactionClasses][2] = {{{0.0}}};
+  Double_t sum2[2][kNReactionClasses][2] = {{{0.0}}};
+  Bool_t lastReacted[2] = {kFALSE, kFALSE};
+  for (size_t i = 0; i < hits.size(); i++) {
+    const SimHit &hit = hits[i];
+    const Int_t ch = hit.channel;
+    const Bool_t afterReacted = lastReacted[ch];
+    lastReacted[ch] = hit.reaction;
+    if (!alone[i] || !(sumTrue[ch] > 0.0))
+      continue;
+    const Int_t c = hit.reaction ? 1 : (afterReacted ? 2 : 0);
+    const Double_t residual[2] = {
+        hit.energy - sumRaw[ch] / sumTrue[ch] * hit.trueAmp,
+        corrected[i] - sumCorr[ch] / sumTrue[ch] * hit.trueAmp};
+    n[ch][c]++;
+    for (Int_t k = 0; k < 2; k++) {
+      sum[ch][c][k] += residual[k];
+      sum2[ch][c][k] += residual[k] * residual[k];
+    }
+  }
+  for (Int_t ch = 0; ch < 2; ch++)
+    for (Int_t c = 0; c < kNReactionClasses; c++) {
+      score.raw[ch][c] = SpreadOf(n[ch][c], sum[ch][c][0], sum2[ch][c][0]);
+      score.corr[ch][c] = SpreadOf(n[ch][c], sum[ch][c][1], sum2[ch][c][1]);
+    }
+  std::cout << Form("reactions %s: right beam %.1f -> %.1f, reacted %.1f -> "
+                    "%.1f (n %.0f); left beam %.1f -> %.1f, reacted %.1f -> "
+                    "%.1f (n %.0f) ADC",
+                    label.Data(), score.raw[1][0], score.corr[1][0],
+                    score.raw[1][1], score.corr[1][1], n[1][1], score.raw[0][0],
+                    score.corr[0][0], score.raw[0][1], score.corr[0][1],
+                    n[0][1])
+            << std::endl;
+  return kTRUE;
+}
+
+// The correction of reacted particles against truth, as a complete booktabs
+// table float with its caption and label (tab:reactions), for the paper to
+// \input (needs siunitx and amsmath).
+void ReactionTable(const std::vector<ReactionScore> &scores,
+                   const RunInfo &runs, Double_t fraction,
+                   const TString &path) {
+  std::ofstream table(path.Data());
+  table << "% Written by mains/figures.cpp; edit that, not this file."
+        << std::endl;
+  table << "\\begin{table}[htbp]" << std::endl;
+  table << "\\centering" << std::endl;
+  table << Form("\\caption{Spread, in ADC, of the simulated pulse height "
+                "about the gain times the true amplitude, before and after "
+                "correction, for beam particles, reacted particles, and beam "
+                "particles whose previous pulse on the same strip was a "
+                "reacted one. Particles with another particle within "
+                "\\SI{5}{\\micro\\second} are left out; the gain is that of "
+                "the beam particles. \\SI{%g}{\\percent} of the particles "
+                "reacted, raised from about $2\\times10^{-5}$ for statistics; "
+                "their deposits in the Long Strips are those of $(\\alpha,n)$ "
+                "and $(\\alpha,p)$ reactions in the $^{37}$Cl simulation, "
+                "weighted by their TALYS cross sections. The baseline "
+                "behaviours are those of Table~\\ref{tab:spread}. The runs "
+                "used "
+                "$\\tau_{\\text{pre}} = \\SI{%g}{\\micro\\second}$ on the "
+                "Long Strips, Right and \\SI{%g}{\\micro\\second} on the Long "
+                "Strips, Left, with $\\tau_{\\text{pz}} = "
+                "\\SI{%g}{\\micro\\second}$.}",
+                100.0 * fraction, runs.tauR_us, runs.tauL_us, runs.tauPz_us)
+        << std::endl;
+  table << "\\label{tab:reactions}" << std::endl;
+  // Scoped by the table; without them the tabular overflows the text width of
+  // the elsarticle preprint.
+  table << "\\small" << std::endl;
+  table << "\\setlength{\\tabcolsep}{4pt}" << std::endl;
+  table << "\\begin{tabular}{@{}llcccccc@{}}" << std::endl;
+  table << "\\toprule" << std::endl;
+  table << "& & \\multicolumn{2}{c}{beam} & \\multicolumn{2}{c}{reacted} & "
+           "\\multicolumn{2}{c}{after reacted} \\\\"
+        << std::endl;
+  table << "\\cmidrule(lr){3-4} \\cmidrule(lr){5-6} \\cmidrule(lr){7-8}"
+        << std::endl;
+  table << "Baseline & rate & before & after & before & after & before & "
+           "after \\\\"
+        << std::endl;
+  const Int_t nSides = 2;
+  const Int_t sides[nSides] = {1, 0};
+  const char *sideNames[nSides] = {"Long Strips, Right", "Long Strips, Left"};
+  for (Int_t s = 0; s < nSides; s++) {
+    table << "\\midrule" << std::endl;
+    table << "\\multicolumn{8}{l}{\\textit{" << sideNames[s] << "}} \\\\"
+          << std::endl;
+    for (Int_t j = 0; j < kNReactionRuns; j++) {
+      table << ReadingLabel(kReactionRuns[j].key)
+            << Form(" & \\SI{%.0f}{\\kilo\\hertz}", kReactionRuns[j].rate_kHz);
+      for (Int_t c = 0; c < kNReactionClasses; c++)
+        table << Form(" & %.1f & %.1f", scores[j].raw[sides[s]][c],
+                      scores[j].corr[sides[s]][c]);
+      table << " \\\\" << std::endl;
+    }
+  }
+  table << "\\bottomrule" << std::endl;
+  table << "\\end{tabular}" << std::endl;
+  table << "\\end{table}" << std::endl;
+  std::cout << "wrote " << path << std::endl;
+}
+
+// The band table: the correction with one kernel per band of the previous
+// pulse height, bands [0, 0.5), [0.5, 1.5), ..., [kNBands - 1.5, inf) times
+// the beam peak, against the production single kernel. The spread table's
+// baseline readings at its three rates, and run 97.
+const Int_t kNBands = 4;
+
+// What scripts/run97_figure.sh measures for the band table: the long groups'
+// spread before correction, with one band and with `bands` bands, in percent
+// of each channel's beam peak, [0] left and [1] right as the simulated
+// chains; and the long ends' trigger rate.
+struct DataBands {
+  Double_t spread[2][3];
+  Int_t bands = 0;
+  Double_t rate_kHz = 0.0;
+};
+
+Bool_t ReadDataBands(const TString &file, DataBands &data) {
+  TFile in(file, "READ");
+  const TVectorD *chain[2] = {
+      (const TVectorD *)in.Get("band_spread_long_left"),
+      (const TVectorD *)in.Get("band_spread_long_right")};
+  const TParameter<Int_t> *bands = (TParameter<Int_t> *)in.Get("band_count");
+  const TParameter<Double_t> *rate =
+      (TParameter<Double_t> *)in.Get("long_rate_kHz");
+  if (!chain[0] || !chain[1] || !bands || !rate || chain[0]->GetNrows() != 3 ||
+      chain[1]->GetNrows() != 3) {
+    std::cout << "skipping band_table: no band spreads in " << file
+              << " (rerun scripts/run97_figure.sh)" << std::endl;
+    return kFALSE;
+  }
+  for (Int_t c = 0; c < 2; c++)
+    for (Int_t k = 0; k < 3; k++)
+      data.spread[c][k] = (*chain[c])[k];
+  data.bands = bands->GetVal();
+  data.rate_kHz = rate->GetVal();
+  if (data.bands != kNBands) {
+    std::cout << "skipping band_table: " << file << " has " << data.bands
+              << " bands, the simulation " << kNBands << std::endl;
+    return kFALSE;
+  }
+  return kTRUE;
+}
+
+// The band table as a complete booktabs table float with its caption and
+// label (tab:bands), for the paper to \input (needs siunitx). single holds
+// the spread table's spreads, banded the same runs with kNBands bands; both
+// in ADC, shown in percent of the simulated beam peak to sit beside run 97.
+void BandTable(const ReadingSpreads &single, const ReadingSpreads &banded,
+               Double_t beamPeak, const DataBands &data, const TString &path) {
+  std::ofstream table(path.Data());
+  table << "% Written by mains/figures.cpp; edit that, not this file."
+        << std::endl;
+  table << "\\begin{table}[htbp]" << std::endl;
+  table << "\\centering" << std::endl;
+  // The band count spelled out in the caption's prose.
+  const char *const words[] = {"zero", "one", "two",   "three", "four",
+                               "five", "six", "seven", "eight", "nine"};
+  const TString count =
+      kNBands < 10 ? TString(words[kNBands]) : TString::Format("%d", kNBands);
+  table << Form("\\caption{Rms pulse-height spread, in percent of the beam "
+                "peak, of pulses within 0.5--1.5 times the beam peak with no "
+                "other pulse on the same strip within "
+                "\\SI{5}{\\micro\\second}, "
+                "before correction and after it with one kernel and with one "
+                "kernel for each of %s bands of the previous pulse height, "
+                "below 0.5, ",
+                count.Data());
+  for (Int_t b = 1; b < kNBands - 1; b++)
+    table << Form("%g--%g, ", b - 0.5, b + 0.5);
+  table << Form("and above %g times the beam peak. The simulated runs are "
+                "those of Table~\\ref{tab:spread}. Run 97 pools all Long "
+                "Strips, Right and all Long Strips, Left, each strip in units "
+                "of its own beam peak, and is corrected with the kernels "
+                "fitted on it.}",
+                kNBands - 1.5)
+        << std::endl;
+  table << "\\label{tab:bands}" << std::endl;
+  // Scoped by the table; without them the tabular overflows the text width of
+  // the elsarticle preprint.
+  table << "\\small" << std::endl;
+  table << "\\setlength{\\tabcolsep}{4pt}" << std::endl;
+  // The baseline reading heads each block, so the rows need only the rate.
+  table << "\\begin{tabular}{@{}lcccccc@{}}" << std::endl;
+  table << "\\toprule" << std::endl;
+  table << "& \\multicolumn{3}{c}{Long Strips, Right} & "
+           "\\multicolumn{3}{c}{Long Strips, Left} \\\\"
+        << std::endl;
+  table << "\\cmidrule(lr){2-4} \\cmidrule(lr){5-7}" << std::endl;
+  table << Form("Rate & before & 1 band & %d bands & before & 1 band & %d "
+                "bands \\\\",
+                kNBands, kNBands)
+        << std::endl;
+  const Int_t sides[2] = {1, 0};
+  const Double_t percent = 100.0 / beamPeak;
+  for (Int_t j = 0; j < kNSpreadReadings; j++) {
+    const RateSpreads &one = single.find(kSpreadReadings[j].key)->second;
+    const RateSpreads &many = banded.find(kSpreadReadings[j].key)->second;
+    table << "\\midrule" << std::endl;
+    table << "\\multicolumn{7}{l}{\\textit{Simulation, "
+          << kSpreadReadings[j].label << "}} \\\\" << std::endl;
+    for (Int_t i = 0; i < kNSpreadRates; i++) {
+      const Spread &a = one.find(kSpreadRates[i])->second;
+      const Spread &b = many.find(kSpreadRates[i])->second;
+      table << Form("\\SI{%.0f}{\\kilo\\hertz}", kSpreadRates[i]);
+      for (Int_t s = 0; s < 2; s++)
+        table << Form(" & %.2f & %.2f & %.2f", percent * a.raw[sides[s]],
+                      percent * a.corr[sides[s]], percent * b.corr[sides[s]]);
+      table << " \\\\" << std::endl;
+    }
+  }
+  table << "\\midrule" << std::endl;
+  table << "\\multicolumn{7}{l}{\\textit{Run 97}} \\\\" << std::endl;
+  table << Form("\\SI{%.0f}{\\kilo\\hertz}", data.rate_kHz);
+  for (Int_t s = 0; s < 2; s++)
+    table << Form(" & %.2f & %.2f & %.2f", data.spread[sides[s]][0],
+                  data.spread[sides[s]][1], data.spread[sides[s]][2]);
+  table << " \\\\" << std::endl;
+  table << "\\bottomrule" << std::endl;
+  table << "\\end{tabular}" << std::endl;
+  table << "\\end{table}" << std::endl;
+  std::cout << "wrote " << path << std::endl;
+}
+
+// Run 97's strip beam-peak FWHM as LaTeX macros for the text, in percent of
+// the peak, before and after the correction, for the strips S1-S16 whose long
+// segment the right chain reads (pole-zero mismatched) and those whose long
+// segment the left chain reads: the mean over the strips, and the narrowest
+// and widest strip. The spectra figures show the peaks themselves.
+void FwhmMacros(const TString &file, const TString &path) {
+  TFile in(file, "READ");
+  const TVectorD *fwhm[2] = {(const TVectorD *)in.Get("fwhm_raw"),
+                             (const TVectorD *)in.Get("fwhm_corrected")};
+  const TVectorD *longRight = (const TVectorD *)in.Get("strip_long_right");
+  const Int_t firstStrip = 1, lastStrip = 16;
+  if (!fwhm[0] || !fwhm[1] || !longRight || fwhm[0]->GetNrows() <= lastStrip ||
+      fwhm[1]->GetNrows() <= lastStrip || longRight->GetNrows() <= lastStrip) {
+    std::cout << "skipping run97_fwhm: no strip FWHM in " << file
+              << " (rerun scripts/run97_figure.sh)" << std::endl;
+    return;
+  }
+  // [0] long segment on the right chain, [1] on the left; [before, after].
+  Double_t n[2] = {0.0, 0.0};
+  Double_t mean[2][2] = {{0.0}}, lo[2][2] = {{1.0e9, 1.0e9}, {1.0e9, 1.0e9}},
+           hi[2][2] = {{0.0}};
+  for (Int_t s = firstStrip; s <= lastStrip; s++) {
+    if ((*longRight)[s] < 0.0)
+      continue;
+    const Int_t g = (*longRight)[s] > 0.5 ? 0 : 1;
+    n[g]++;
+    for (Int_t k = 0; k < 2; k++) {
+      const Double_t value = (*fwhm[k])[s];
+      if (!(value > 0.0)) {
+        std::cout << "skipping run97_fwhm: no beam peak found in strip " << s
+                  << std::endl;
+        return;
+      }
+      mean[g][k] += value;
+      lo[g][k] = TMath::Min(lo[g][k], value);
+      hi[g][k] = TMath::Max(hi[g][k], value);
+    }
+  }
+  if (!(n[0] > 0.0) || !(n[1] > 0.0)) {
+    std::cout << "skipping run97_fwhm: strips of only one kind in " << file
+              << std::endl;
+    return;
+  }
+  std::cout << "run 97 strip FWHM [% of peak], before -> after:";
+  for (Int_t s = firstStrip; s <= lastStrip; s++)
+    std::cout << Form(" S%d%s %.1f->%.1f", s,
+                      (*longRight)[s] > 0.5 ? "(R)" : "(L)", (*fwhm[0])[s],
+                      (*fwhm[1])[s]);
+  std::cout << std::endl;
+  std::ofstream macros(path.Data());
+  macros << "% Written by mains/figures.cpp; edit that, not this file."
+         << std::endl;
+  macros << "% Run 97's strip beam-peak FWHM, in percent of the peak, before "
+            "and after the"
+         << std::endl;
+  macros << "% correction, for the strips S1-S16 with a Long Strip, Right "
+            "(LongRight) and"
+         << std::endl;
+  macros << "% those with a Long Strip, Left (LongLeft):" << std::endl;
+  macros << "% the mean over the strips, then the narrowest and the widest "
+            "strip."
+         << std::endl;
+  const char *side[2] = {"LongRight", "LongLeft"};
+  const char *when[2] = {"Before", "After"};
+  for (Int_t g = 0; g < 2; g++)
+    for (Int_t k = 0; k < 2; k++) {
+      macros << Form("\\newcommand{\\Fwhm%s%s}{%.1f}", side[g], when[k],
+                     mean[g][k] / n[g])
+             << std::endl;
+      macros << Form("\\newcommand{\\Fwhm%s%sMin}{%.1f}", side[g], when[k],
+                     lo[g][k])
+             << std::endl;
+      macros << Form("\\newcommand{\\Fwhm%s%sMax}{%.1f}", side[g], when[k],
+                     hi[g][k])
+             << std::endl;
+    }
+  std::cout << "wrote " << path << std::endl;
+}
+
+// A profile's bin means against the bin centre, leaving out bins with fewer
+// than minEntries entries.
+TGraphErrors *ProfileGraph(const TProfile *profile, Double_t minEntries) {
   TGraphErrors *graph = new TGraphErrors();
   for (Int_t bin = 1; bin <= profile->GetNbinsX(); bin++) {
-    if (profile->GetBinEntries(bin) <= 0)
+    if (profile->GetBinEntries(bin) < TMath::Max(minEntries, 1.0))
       continue;
     const Int_t n = graph->GetN();
     graph->SetPoint(n, TMath::Power(10.0, profile->GetBinCenter(bin)),
@@ -849,7 +1253,15 @@ TGraphErrors *ProfileGraph(const TProfile *profile) {
   return graph;
 }
 
-// (Fig. 5) Run 97 long-right profile before and after correction.
+// Run 97's long-right profile before and after correction: the mean, over the
+// pulses in each bin of the time since the previous pulse, of the pulse height
+// less its channel's average over all beam-like pulses (so the profile
+// averages to zero). Bins with fewer than kMinProfilePulses pulses are left
+// out; at 44 kHz that ends the profile near 220 us, short of the kernel's
+// 316 us reach, which the fit fills from every earlier pulse rather than the
+// previous one alone.
+const Double_t kMinProfilePulses = 200.0;
+
 void DeviationFigure(const TString &file) {
   TFile in(file, "READ");
   const TProfile *beforeProfile = (const TProfile *)in.Get("before_long_right");
@@ -858,14 +1270,16 @@ void DeviationFigure(const TString &file) {
     std::cerr << "no long-right profiles in " << file << std::endl;
     return;
   }
-  TGraphErrors *before = ProfileGraph(beforeProfile);
-  TGraphErrors *after = ProfileGraph(afterProfile);
+  TGraphErrors *before = ProfileGraph(beforeProfile, kMinProfilePulses);
+  TGraphErrors *after = ProfileGraph(afterProfile, kMinProfilePulses);
   const Double_t xLo = 1.0, xHi = 350.0, yLo = -150.0, yHi = 300.0;
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   canvas->SetLogx();
-  TH1F *frame = Frame(canvas, xLo, yLo, xHi, yHi,
-                      "Time Between Pulses #Delta#it{t} [#mus]",
-                      "Pulse Height #minus Average [ADC]");
+  // The mean in TLatex angle brackets, since "Mean" does not fit on one line.
+  // They come from the Symbol font, which ROOT PDFs name but do not embed: a
+  // viewer with no Symbol font of its own leaves them out.
+  TH1F *frame = Frame(canvas, xLo, yLo, xHi, yHi, "Time Between Pulses [#mus]",
+                      "#LTPulse Height #minus#kern[0.12]{Average}#GT [ADC]");
   frame->GetXaxis()->SetMoreLogLabels();
   frame->GetXaxis()->SetNoExponent();
   Reference(xLo, xHi, 0.0);
@@ -892,6 +1306,83 @@ void DeviationFigure(const TString &file) {
   legend->Draw();
   PlottingUtils::SaveFigure(canvas, "run97_deviation_R", "",
                             PlotSaveOptions::kLINEAR);
+  delete canvas;
+}
+
+// Run 97's strip spectra before or after the correction, in units of each
+// strip's beam peak: the figure MUSIC's events summary draws, for the
+// segmented strips 1-16 only, with the side legend sized to its entries.
+void StripSpectraFigure(const TString &file, Bool_t corrected) {
+  const Int_t firstStrip = 1;
+  const Int_t nStrips = 16;
+  std::vector<TH1D *> spectra;
+  std::vector<TString> labels;
+  {
+    TFile in(file, "READ");
+    for (Int_t s = firstStrip; s < firstStrip + nStrips; s++) {
+      const TH1D *stored = (const TH1D *)in.Get(
+          Form("strip_%s_S%d", corrected ? "corrected" : "raw", s));
+      if (!stored) {
+        std::cerr << "no strip spectra in " << file
+                  << " (rerun scripts/run97_figure.sh)" << std::endl;
+        return;
+      }
+      TH1D *spectrum = (TH1D *)stored->Clone(PlottingUtils::GetRandomName());
+      spectrum->SetDirectory(nullptr);
+      spectra.push_back(spectrum);
+      labels.push_back(Form("S%d", s));
+    }
+  }
+  TPad *plot = nullptr;
+  TPad *legendPad = nullptr;
+  const Double_t legendWidthPx = PlottingUtils::LegendWidthPx(labels);
+  TCanvas *canvas = PlottingUtils::GetConfiguredCanvasWithSideLegend(
+      plot, legendPad, Int_t(legendWidthPx), 800, kTRUE);
+  const std::vector<Int_t> colours = PlottingUtils::GetDefaultColors();
+  Double_t yMax = 0.0;
+  for (Int_t s = 0; s < nStrips; s++)
+    yMax = TMath::Max(yMax, spectra[s]->GetMaximum());
+  spectra[0]->SetMaximum(3.0 * yMax);
+  spectra[0]->SetMinimum(0.5);
+  PlottingUtils::ConfigureAndDrawHistogram(spectra[0], colours[0],
+                                           ";#DeltaE [a.u.];Counts");
+  for (Int_t s = 1; s < nStrips; s++) {
+    PlottingUtils::ConfigureHistogram(spectra[s],
+                                      colours[s % Int_t(colours.size())]);
+    spectra[s]->Draw("HIST SAME");
+  }
+  plot->RedrawAxis();
+  TLegend *legend = PlottingUtils::AddSideLegend(plot, legendPad, nStrips);
+  // Two corrections to AddSideLegend's box. Sixteen of its 50 px rows are
+  // taller than the frame, so the box would fill the canvas and cover the last
+  // x-axis label: fit it to the frame's height (both pads span the canvas
+  // height, so the frame's margins carry over). And it spans the whole legend
+  // pad, from the frame's right edge to the canvas edge, which also holds the
+  // plot's right margin: narrow it to the width its entries need, centred
+  // between the frame and the edge. ROOT paints a drawn legend from its pad
+  // coordinates, which in the axis-less legend pad equal NDC, so both are set.
+  const Double_t frameBottom = plot->GetBottomMargin();
+  const Double_t frameTop = 1.0 - plot->GetTopMargin();
+  const Double_t legendPadPx = legendPad->GetWw() * legendPad->GetAbsWNDC();
+  const Double_t boxWidth = legendWidthPx / legendPadPx;
+  const Double_t boxLeft = 0.5 * (1.0 - boxWidth);
+  const Double_t boxRight = boxLeft + boxWidth;
+  legend->SetX1NDC(boxLeft);
+  legend->SetX2NDC(boxRight);
+  legend->SetY1NDC(frameBottom);
+  legend->SetY2NDC(frameTop);
+  legend->SetX1(boxLeft);
+  legend->SetX2(boxRight);
+  legend->SetY1(frameBottom);
+  legend->SetY2(frameTop);
+  for (Int_t s = 0; s < nStrips; s++)
+    legend->AddEntry(spectra[s], labels[s], "l");
+  PlottingUtils::AddText(corrected ? "After Correction" : "Before Correction",
+                         0.88, 0.92);
+  PanelLabel(corrected ? "(b)" : "(a)");
+  PlottingUtils::SaveFigure(
+      canvas, corrected ? "run97_spectra_corrected" : "run97_spectra", "",
+      PlotSaveOptions::kLINEAR);
   delete canvas;
 }
 
@@ -922,11 +1413,10 @@ void MovePngs(const TString &dir) {
 } // namespace
 
 int main(int argc, char **argv) {
-  TString out = "doc/figs", run = "run97_c000";
-  TString log = TString(gSystem->HomeDirectory()) +
-                "/MUSIC/analysis/37Cl/pipeline_fused.log";
+  TString out = "doc/figs";
   TString spreadDir = "output/spread";
-  TString run97 = "output/run97/deviation.root";
+  TString reactionDir = "output/reactions";
+  TString run97 = "output/run97/run97.root";
   TString long1 = "output/figures/long_1kHz.root";
   TString long40 = "output/figures/long_40kHz.root";
   PlotSaveFormat format = PlotSaveFormat::kPNGAndPDF;
@@ -934,12 +1424,10 @@ int main(int argc, char **argv) {
     TString argument = argv[i];
     if (argument.BeginsWith("--out="))
       out = argument(6, argument.Length() - 6);
-    else if (argument.BeginsWith("--log="))
-      log = argument(6, argument.Length() - 6);
-    else if (argument.BeginsWith("--run="))
-      run = argument(6, argument.Length() - 6);
     else if (argument.BeginsWith("--spread="))
       spreadDir = argument(9, argument.Length() - 9);
+    else if (argument.BeginsWith("--reactions="))
+      reactionDir = argument(12, argument.Length() - 12);
     else if (argument.BeginsWith("--run97="))
       run97 = argument(8, argument.Length() - 8);
     else if (argument.BeginsWith("--long1="))
@@ -962,14 +1450,13 @@ int main(int argc, char **argv) {
   if (HaveInput(long40, "spectrum_40kHz"))
     SpectrumFigure(long40, "40kHz");
 
-  if (HaveInput(log, "kernel_run97")) {
-    std::vector<std::vector<Double_t>> kernels = ReadKernels(log, run);
-    if (kernels.size() < 3) {
-      std::cerr << "found " << kernels.size() << " kernels for " << run
-                << " in " << log << std::endl;
-    } else {
+  if (HaveInput(run97, "kernel_run97")) {
+    std::vector<std::vector<Double_t>> kernels = ReadKernels(run97);
+    if (kernels.size() < 3)
+      std::cerr << "no kernels in " << run97
+                << " (rerun scripts/run97_figure.sh)" << std::endl;
+    else
       KernelFigure(kernels);
-    }
   }
 
   if (format != PlotSaveFormat::kPNG) {
@@ -993,13 +1480,12 @@ int main(int argc, char **argv) {
       for (size_t i = 0; i < allRates.size() && haveSpreads; i++) {
         const size_t n = j * allRates.size() + i;
         RunInfo info;
-        haveSpreads = MeasureSpread(spreadFiles[n], spreadLabels[n],
-                                    spreads[kSpreadReadings[j].key][allRates[i]],
-                                    info);
+        haveSpreads =
+            MeasureSpread(spreadFiles[n], spreadLabels[n],
+                          spreads[kSpreadReadings[j].key][allRates[i]], info);
         if (n == 0)
           runs = info;
-        else if (info.tauL_us != runs.tauL_us ||
-                 info.tauR_us != runs.tauR_us ||
+        else if (info.tauL_us != runs.tauL_us || info.tauR_us != runs.tauR_us ||
                  info.tauPz_us != runs.tauPz_us) {
           std::cout << "skipping spread_table: " << spreadFiles[n]
                     << " has other decay times than " << spreadFiles[0]
@@ -1010,10 +1496,63 @@ int main(int argc, char **argv) {
     }
     if (haveSpreads)
       SpreadTable(spreads, runs, out + "/spread_table.tex");
+
+    // The band table: two of the spread table's readings corrected again with
+    // kNBands amplitude bands, beside what run 97 shows.
+    DataBands dataBands;
+    if (haveSpreads && HaveInput(run97, "band_table") &&
+        ReadDataBands(run97, dataBands)) {
+      ReadingSpreads banded;
+      Bool_t haveBands = kTRUE;
+      for (Int_t j = 0; j < kNSpreadReadings && haveBands; j++)
+        for (Int_t i = 0; i < kNSpreadRates && haveBands; i++) {
+          const char *key = kSpreadReadings[j].key;
+          const TString label = Form("%s_r%g", key, kSpreadRates[i]);
+          RunInfo info;
+          haveBands =
+              MeasureSpread(spreadDir + "/" + label + ".root",
+                            label + Form(" %d bands", kNBands),
+                            banded[key][kSpreadRates[i]], info, kNBands);
+        }
+      if (haveBands)
+        BandTable(spreads, banded, runs.beamPeak, dataBands,
+                  out + "/band_table.tex");
+    }
+
+    Bool_t haveReactions = kTRUE;
+    std::vector<TString> reactionFiles;
+    for (Int_t j = 0; j < kNReactionRuns && haveReactions; j++) {
+      reactionFiles.push_back(reactionDir + Form("/%s_r%g.root",
+                                                 kReactionRuns[j].key,
+                                                 kReactionRuns[j].rate_kHz));
+      haveReactions = HaveInput(reactionFiles.back(), "reaction_table");
+    }
+    std::vector<ReactionScore> scores(kNReactionRuns);
+    RunInfo reactionRuns;
+    Double_t fraction = 0.0;
+    for (Int_t j = 0; j < kNReactionRuns && haveReactions; j++) {
+      RunInfo info;
+      Double_t runFraction = 0.0;
+      haveReactions =
+          ScoreReactions(reactionFiles[j], gSystem->BaseName(reactionFiles[j]),
+                         scores[j], info, runFraction);
+      if (j == 0) {
+        reactionRuns = info;
+        fraction = runFraction;
+      }
+    }
+    if (haveReactions)
+      ReactionTable(scores, reactionRuns, fraction,
+                    out + "/reaction_table.tex");
   }
 
-  if (HaveInput(run97, "run97_deviation_R"))
+  if (HaveInput(run97, "run97 figures")) {
     DeviationFigure(run97);
+    StripSpectraFigure(run97, kFALSE);
+    StripSpectraFigure(run97, kTRUE);
+    if (format != PlotSaveFormat::kPNG)
+      FwhmMacros(run97, out + "/run97_fwhm.tex");
+  }
   if (format == PlotSaveFormat::kPNGAndPDF)
     MovePngs(out);
   return 0;

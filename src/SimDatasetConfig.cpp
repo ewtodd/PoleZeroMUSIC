@@ -50,8 +50,8 @@ void InitSimDatasetConfig() {
   gInstance.channelMap = {{{0, 0}, "Grid"}, {{0, 1}, "L1"}, {{0, 2}, "R2"}};
 }
 
-// Amplitude bands of the kernel (1 here; 4 in the 37Cl configuration), for
-// studies that compare the two.
+// Amplitude bands of the kernel: 1, as in the 37Cl configuration, unless the
+// band table of figures asks for more.
 void SetSimPulseHistoryAmpBins(Int_t n) {
   gInstance.PULSE_HISTORY_AMP_BINS = n;
 }
