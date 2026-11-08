@@ -598,15 +598,22 @@ Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits, RunInfo &info) {
 }
 
 // Pulse-height spectra of one simulated run. Non-pileup hits enter the
-// histograms.
+// histograms. The corrected heights are whole ADC counts, as PulseHistory
+// stores them, so the bins are a whole number of counts wide with edges on
+// multiples of that width: every bin then holds the same number of possible
+// heights, where 13.3-count bins alternately held 13 and 14 and combed the
+// corrected spectra.
 void DrawSpectrum(const std::vector<SimHit> &hits,
                   const std::vector<Double_t> &energies, Double_t beamPeak,
                   const TString &label, const TString &name,
                   const char *panel) {
-  TH1D *left = new TH1D("spectrum_L", ";Pulse Height [ADC];Counts", 300, 0.0,
-                        2.5 * beamPeak);
-  TH1D *right = new TH1D("spectrum_R", ";Pulse Height [ADC];Counts", 300, 0.0,
-                         2.5 * beamPeak);
+  const Double_t binWidth =
+      TMath::Max(1.0, Double_t(TMath::Nint(2.5 * beamPeak / 300.0)));
+  const Int_t nBins = Int_t(TMath::Ceil(2.5 * beamPeak / binWidth));
+  TH1D *left = new TH1D("spectrum_L", ";Pulse Height [ADC];Counts", nBins, 0.0,
+                        nBins * binWidth);
+  TH1D *right = new TH1D("spectrum_R", ";Pulse Height [ADC];Counts", nBins, 0.0,
+                         nBins * binWidth);
   left->SetDirectory(nullptr);
   right->SetDirectory(nullptr);
 
