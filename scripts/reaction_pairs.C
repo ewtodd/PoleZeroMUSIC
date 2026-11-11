@@ -5,7 +5,10 @@
 // each end in units of the unreacted beam's mean deposit there. A pair's
 // weight is its channel's TALYS cross section at the strip's beam energy,
 // shared over that strip's events and pairs, so channels and strips enter at
-// their relative rates.
+// their relative rates. The file ends with the physical rate of these
+// reactions per beam particle, a "# rate" comment line that figures reads for
+// the reaction table's caption: the summed cross sections times the He areal
+// density of one strip.
 //   root -l -b -q 'scripts/reaction_pairs.C("<sim_root_files>", "<pairs.txt>")'
 #include <TFile.h>
 #include <TMath.h>
@@ -22,6 +25,15 @@ const Int_t kNStrips = 16;
 const Long64_t kEventsPerFile = 3000;
 const Double_t kMassAlpha = 4.0026;
 const Double_t kMassCl37 = 36.9659;
+// The He areal density of one strip, as MUSIC's CrossSection.cpp computes it
+// (ideal gas at the fill temperature over one strip's active length) at the
+// 37Cl runs' pressure (CROSS_SECTION_CONFIG.GAS_PRESSURE_TORR).
+const Double_t kGasPressureTorr = 400.0;
+const Double_t kGasTemperatureK = 293.0;
+const Double_t kStripLengthCm = 1.578;
+const Double_t kBoltzmann = 1.380649e-23; // J/K
+const Double_t kPaPerTorr = 133.322368;
+const Double_t kCm2PerMb = 1.0e-27;
 
 // TALYS cross section [mb] of one exit channel ("n", "p"), from the table in
 // dir whose centre-of-mass energy is closest to ecm and which lists it.
@@ -98,6 +110,9 @@ void reaction_pairs(const char *simDir, const char *outPath) {
   const char *channels[nChannels] = {"n", "p"};
   Double_t sumW = 0.0, sumL = 0.0, sumR = 0.0, sumLL = 0.0, sumRR = 0.0,
            sumLR = 0.0;
+  // Each channel's cross section at each reaction strip, summed: the rate per
+  // beam particle per unit areal density.
+  Double_t sumSigma = 0.0;
   Long64_t rows = 0;
   for (Int_t c = 0; c < nChannels; c++) {
     for (Int_t s = 2; s <= 8; s++) {
@@ -134,6 +149,7 @@ void reaction_pairs(const char *simDir, const char *outPath) {
                   << std::endl;
         continue;
       }
+      sumSigma += sigma;
       Int_t nPairs = 0;
       for (Int_t k = 1; k + 1 <= kNStrips; k += 2)
         if (k >= s)
@@ -167,9 +183,18 @@ void reaction_pairs(const char *simDir, const char *outPath) {
   const Double_t mL = sumL / sumW, mR = sumR / sumW;
   const Double_t sL = TMath::Sqrt(sumLL / sumW - mL * mL);
   const Double_t sR = TMath::Sqrt(sumRR / sumW - mR * mR);
+  const Double_t areal = kGasPressureTorr * kPaPerTorr /
+                         (kBoltzmann * kGasTemperatureK) * 1.0e-6 *
+                         kStripLengthCm;
+  const Double_t rate = sumSigma * kCm2PerMb * areal;
+  out << Form("# rate %.4g per beam particle: (alpha,n) and (alpha,p) in "
+              "strips 2-8, %.4g mb summed, %.4g He atoms/cm^2 per strip",
+              rate, sumSigma, areal)
+      << std::endl;
   std::cout << Form("wrote %lld pairs to %s: rL %.3f +- %.3f, rR %.3f +- "
-                    "%.3f, correlation %+.2f",
+                    "%.3f, correlation %+.2f; physical rate %.3g per beam "
+                    "particle",
                     rows, outPath, mL, sL, mR, sR,
-                    (sumLR / sumW - mL * mR) / (sL * sR))
+                    (sumLR / sumW - mL * mR) / (sL * sR), rate)
             << std::endl;
 }

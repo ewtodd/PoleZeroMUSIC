@@ -2,9 +2,10 @@
 # Simulated runs with reacted particles, to show the correction on them too.
 # Their long-end deposits come from MUSIC's 37Cl simulation, (alpha,n) and
 # (alpha,p) weighted by TALYS (scripts/reaction_pairs.C). The reaction rate is
-# raised to 1 % for statistics; the physical rate is about 2e-5 per beam
-# particle. Settings and seeds are those of scripts/spread_inputs.sh, so the
-# beam is event for event that of the reaction-free runs in output/spread.
+# raised to 1 % for statistics from the physical rate, which reaction_pairs.C
+# computes and appends to pairs.txt for the table caption. Settings and seeds
+# are those of scripts/spread_inputs.sh, so the beam is event for event that of
+# the reaction-free runs in output/spread.
 # Run from anywhere: bash scripts/reaction_inputs.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."

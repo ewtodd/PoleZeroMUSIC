@@ -97,8 +97,7 @@ typedef std::map<TString, RateSpreads> ReadingSpreads;
 // with EnergyFilterLFLimitation on, as on every channel of the 37Cl runs
 // (data_raw/music_exp1915_097XSetting_66222.dat): after the freeze, averaging
 // resumes only once the trapezoid is back near the baseline. CAEN does not say
-// how near. The simulation uses 80 ADC held for 2 us, its default; at
-// tauR = 10 us, run 97 favours an earlier restart, about 40 ADC for 1 us.
+// how near; the simulation uses 80 ADC held for 2 us, its default.
 struct SpreadReading {
   const char *key;
   const char *label;
@@ -197,11 +196,11 @@ void PanelLabel(const char *text) {
 }
 
 // --------------------------------------------- simulated filter outputs
-// c of the note's Eq. (eq:c): after (k+l)T a unit pulse leaves
-// -c exp(-t/tau_pre).
+// c of the paper's Eq. (eq:c): after (k+l)T a unit pulse leaves
+// c exp(-t/tau_pre), an undershoot (c < 0) when tau_pre < tau_pz.
 Double_t TailAmplitude(Double_t tauPre, Double_t tauPz, Double_t riseUs,
                        Double_t flatTopEndUs) {
-  return (tauPz - tauPre) * tauPre / (riseUs * tauPz) *
+  return (tauPre - tauPz) * tauPre / (riseUs * tauPz) *
          (1.0 - TMath::Exp(riseUs / tauPre)) *
          (1.0 - TMath::Exp(flatTopEndUs / tauPre));
 }
@@ -323,34 +322,34 @@ void TrapezoidFigure() {
   delete canvas;
 }
 
-// (Fig. 1b) The same preamp through matched, under- and over-compensated
-// pole--zero settings; the tails after (k + l)T are the point.
+// (Fig. 1b) The same preamp through under- and over-compensated pole-zero
+// settings; the tails after (k + l)T are the point. Panel (a) shows the
+// matched case.
 void PoleZeroFigure() {
   const Double_t tauPre = 10.0;
   const Double_t kUs = kTrapRiseNs / 1000.0;
   const Double_t lUs = (kTrapRiseNs + kTrapFlatNs) / 1000.0;
   const Double_t endUs = kUs + lUs;
-  const Double_t tauPz[3] = {20.0, 5.0, 10.0};
-  const Int_t colour[3] = {kRightColour, kLeftColour, kMatchedColour};
+  const Int_t nCases = 2;
+  const Double_t tauPz[nCases] = {20.0, 5.0};
+  const Int_t colour[nCases] = {kRightColour, kLeftColour};
   const Double_t tMin = -1.0, tMax = 45.0;
   const Double_t yLo = -0.45, yHi = 0.45;
   std::vector<Double_t> one(1, 0.0);
 
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
-  Frame(canvas, tMin, yLo, tMax, yHi, "Time [#mus]",
-        "Filter Output #hat{#it{s}}(t) [a.u.]");
+  Frame(canvas, tMin, yLo, tMax, yHi, "Time [#mus]", "Amplitude [a.u.]");
   Reference(tMin, tMax, 0.0);
   TimeMark(endUs, yLo, yHi);
 
-  TGraph *graphs[3];
+  TGraph *graphs[nCases];
   std::vector<TString> labels;
-  for (Int_t v = 0; v < 3; v++) {
+  for (Int_t v = 0; v < nCases; v++) {
     graphs[v] = StepResponse(tauPre, tauPz[v], one, tMin, tMax, 6);
     PlottingUtils::ConfigureGraph(graphs[v], colour[v]);
     graphs[v]->Draw("L SAME");
     labels.push_back(
-        Form("#tau_{pz} = %.0f #mus%s,  %s", tauPz[v],
-             tauPz[v] == tauPre ? " = #tau_{pre}" : "",
+        Form("#tau_{pz} = %.0f #mus,  %s", tauPz[v],
              TailLabel(TailAmplitude(tauPre, tauPz[v], kUs, lUs)).Data()));
   }
   canvas->RedrawAxis();
@@ -359,13 +358,11 @@ void PoleZeroFigure() {
   Note(endUs + 4, -0.14, "under-compensated", 13, colour[0]);
   Note(endUs + 0.4, yLo + 0.06, "(#it{k}+#it{l})#it{T}", 10);
 
-  TLegend *legend = Legend(labels, 0.16, 0.33);
-  const Int_t order[3] = {2, 0, 1};
-  for (Int_t j = 0; j < 3; j++) {
-    const Int_t v = order[j];
+  TLegend *legend = Legend(labels, 0.16, 0.27);
+  for (Int_t v = 0; v < nCases; v++)
     legend->AddEntry(graphs[v], labels[v], "l");
-  }
   legend->Draw();
+  PlottingUtils::AddText("#tau_{pre} = 10 #mus", 0.87, 0.84);
   PanelLabel("(b)");
 
   PlottingUtils::SaveFigure(canvas, "polezero", "", PlotSaveOptions::kLINEAR);
@@ -403,9 +400,7 @@ void SinglePulseFigure() {
   Note(0.5 * kUs, 1.18, "rise", 21);
   Note(0.5 * (kUs + lUs), 1.18, "flat top", 21);
   Note(0.5 * (lUs + endUs), 1.18, "fall", 21);
-  TimeArrow(0.0, kUs, 1.42, 1.48, "#it{kT}");
-  TimeArrow(kUs, tm, 1.42, 1.48, "#it{t}_{p}");
-  TimeArrow(0.0, tm, 1.70, 1.76, "#it{t}_{m} = #it{kT} + #it{t}_{p}");
+  TimeArrow(0.0, tm, 1.42, 1.48, "#it{t}_{m}");
   TimeMark(tm, yLo, out->Eval(tm));
   TGraph *read = new TGraph(1);
   read->SetPoint(0, tm, out->Eval(tm));
@@ -419,7 +414,7 @@ void SinglePulseFigure() {
   Note(endUs + 1.3, 0.95, "pulse height measured at #it{t}_{m}", 12);
   TimeArrow(0.0, tf, -0.50, -0.44, "baseline frozen for #it{t}_{f}");
   Note(endUs + 1.5, -0.27,
-       Form("tail:  #hat{#it{s}} = #minus #it{c} "
+       Form("tail:  #hat{#it{s}} = #it{c} "
             "e^{#minus#kern[0.15]{#it{t}}/#tau_{pre}},  %s",
             TailLabel(tail).Data()),
        13, kRightColour);
@@ -597,54 +592,84 @@ Bool_t ReadHits(const TString &path, std::vector<SimHit> &hits, RunInfo &info) {
   return kTRUE;
 }
 
-// Pulse-height spectra of one simulated run. Non-pileup hits enter the
-// histograms. The corrected heights are whole ADC counts, as PulseHistory
-// stores them, so the bins are a whole number of counts wide with edges on
-// multiples of that width: every bin then holds the same number of possible
-// heights, where 13.3-count bins alternately held 13 and 14 and combed the
-// corrected spectra.
-void DrawSpectrum(const std::vector<SimHit> &hits,
-                  const std::vector<Double_t> &energies, Double_t beamPeak,
-                  const TString &label, const TString &name,
-                  const char *panel) {
+// The pulse-height spectrum of one chain of a simulated run (channel 0 the
+// left, 1 the right), from its non-pileup hits. The corrected heights are
+// whole ADC counts, as PulseHistory stores them, so the bins are a whole number
+// of counts wide with edges on multiples of that width: every bin then holds
+// the same number of possible heights, where 13.3-count bins alternately held
+// 13 and 14 and combed the corrected spectra.
+TH1D *ChainSpectrum(const std::vector<SimHit> &hits,
+                    const std::vector<Double_t> &energies, Int_t channel,
+                    Double_t beamPeak) {
   const Double_t binWidth =
       TMath::Max(1.0, Double_t(TMath::Nint(2.5 * beamPeak / 300.0)));
   const Int_t nBins = Int_t(TMath::Ceil(2.5 * beamPeak / binWidth));
-  TH1D *left = new TH1D("spectrum_L", ";Pulse Height [ADC];Counts", nBins, 0.0,
-                        nBins * binWidth);
-  TH1D *right = new TH1D("spectrum_R", ";Pulse Height [ADC];Counts", nBins, 0.0,
-                         nBins * binWidth);
-  left->SetDirectory(nullptr);
-  right->SetDirectory(nullptr);
+  TH1D *spectrum =
+      new TH1D(PlottingUtils::GetRandomName(), ";Pulse Height [ADC];Counts",
+               nBins, 0.0, nBins * binWidth);
+  spectrum->SetDirectory(nullptr);
+  for (size_t i = 0; i < hits.size(); i++)
+    if (!hits[i].pileup && hits[i].channel == channel)
+      spectrum->Fill(energies[i]);
+  return spectrum;
+}
 
-  for (Int_t i = 0; i < Int_t(hits.size()); i++) {
-    if (hits[i].pileup)
-      continue;
-    TH1D *hist = hits[i].channel == 0 ? left : right;
-    hist->Fill(energies[i]);
-  }
+// One panel of the spectra figure: a run's matched (left chain) and
+// mismatched (right chain) spectra, before the correction dashed and after it
+// solid, in one frame.
+void DrawSpectra(const std::vector<SimHit> &hits,
+                 const std::vector<Double_t> &raw,
+                 const std::vector<Double_t> &corrected, Double_t beamPeak,
+                 const TString &rateLabel, const TString &name,
+                 const char *panel) {
+  // [chain][0 before, 1 after]
+  TH1D *spectra[2][2];
+  Double_t yMax = 0.0;
+  for (Int_t chain = 0; chain < 2; chain++)
+    for (Int_t k = 0; k < 2; k++) {
+      spectra[chain][k] =
+          ChainSpectrum(hits, k == 0 ? raw : corrected, chain, beamPeak);
+      yMax = TMath::Max(yMax, spectra[chain][k]->GetMaximum());
+    }
 
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   // Five-digit counts need more room than the style's left margin. Drawing
   // applies the style, so the title offset has to be set afterwards.
   canvas->SetLeftMargin(0.18);
-  const Double_t yMax =
-      1.45 * TMath::Max(left->GetMaximum(), right->GetMaximum());
-  left->SetMaximum(yMax);
-  PlottingUtils::ConfigureAndDrawHistogram(left, kLeftColour,
+  const Int_t colour[2] = {kLeftColour, kRightColour};
+  // The dashed spectra first, so the corrected ones are drawn over them.
+  spectra[0][0]->SetMaximum(1.45 * yMax);
+  PlottingUtils::ConfigureAndDrawHistogram(spectra[0][0], colour[0],
                                            ";Pulse Height [ADC];Counts");
-  left->GetYaxis()->SetTitleOffset(1.4);
-  PlottingUtils::ConfigureHistogram(right, kRightColour);
-  right->Draw("HIST SAME");
+  spectra[0][0]->GetYaxis()->SetTitleOffset(1.4);
+  for (Int_t k = 0; k < 2; k++)
+    for (Int_t chain = 0; chain < 2; chain++) {
+      if (k == 0 && chain == 0)
+        continue;
+      PlottingUtils::ConfigureHistogram(spectra[chain][k], colour[chain]);
+      spectra[chain][k]->Draw("HIST SAME");
+    }
+  for (Int_t chain = 0; chain < 2; chain++)
+    spectra[chain][0]->SetLineStyle(2);
 
+  // Colour says which chain, the line style before or after correction.
+  TLine *dashed = new TLine();
+  dashed->SetLineStyle(2);
+  dashed->SetLineWidth(spectra[0][1]->GetLineWidth());
+  TLine *solid = new TLine();
+  solid->SetLineWidth(spectra[0][1]->GetLineWidth());
   std::vector<TString> labels;
   labels.push_back("#tau_{pz} = #tau_{pre}");
   labels.push_back("#tau_{pz} #neq #tau_{pre}");
-  TLegend *legend = Legend(labels, 0.74, 0.87);
-  legend->AddEntry(left, labels[0], "l");
-  legend->AddEntry(right, labels[1], "l");
+  labels.push_back("Before Correction");
+  labels.push_back("After Correction");
+  TLegend *legend = Legend(labels, 0.61, 0.87);
+  legend->AddEntry(spectra[0][1], labels[0], "l");
+  legend->AddEntry(spectra[1][1], labels[1], "l");
+  legend->AddEntry(dashed, labels[2], "l");
+  legend->AddEntry(solid, labels[3], "l");
   legend->Draw();
-  PlottingUtils::AddText(label, 0.88, 0.92);
+  PlottingUtils::AddText(rateLabel, 0.88, 0.92);
   PanelLabel(panel);
   PlottingUtils::SaveFigure(canvas, name, "", PlotSaveOptions::kLINEAR);
   delete canvas;
@@ -668,24 +693,22 @@ Bool_t CorrectRun(const std::vector<SimHit> &hits, const TString &label,
   return kTRUE;
 }
 
-void SpectrumFigure(const TString &path, const TString &label) {
+// (Fig. rates) One panel of the spectra figure, from one simulated run: the
+// spectra before and after the PulseHistory correction, with the kernel
+// measured on the run itself.
+void SpectrumFigure(const TString &path, const TString &rateLabel,
+                    const TString &name, const char *panel) {
   std::vector<SimHit> hits;
   RunInfo info;
   if (!ReadHits(path, hits, info))
     return;
-
-  const char *panel = label == "1kHz" ? "(a)" : "(b)";
   std::vector<Double_t> raw(hits.size(), 0.0);
-  for (Int_t i = 0; i < Int_t(hits.size()); i++)
+  for (size_t i = 0; i < hits.size(); i++)
     raw[i] = hits[i].energy;
-  DrawSpectrum(hits, raw, info.beamPeak, label,
-               Form("spectrum_%s", label.Data()), panel);
-
   std::vector<Double_t> corrected;
-  if (!CorrectRun(hits, label, corrected))
+  if (!CorrectRun(hits, name, corrected))
     return;
-  DrawSpectrum(hits, corrected, info.beamPeak, label,
-               Form("spectrum_%s_corrected", label.Data()), panel);
+  DrawSpectra(hits, raw, corrected, info.beamPeak, rateLabel, name, panel);
 }
 
 // Standard deviation about the mean, the former analyze program's "RMS".
@@ -798,14 +821,17 @@ void SpreadTable(const ReadingSpreads &spreads, const RunInfo &runs,
         << std::endl;
   table << "\\begin{table}[htbp]" << std::endl;
   table << "\\centering" << std::endl;
-  table << Form("\\caption{Simulated rms pulse-height spread, in ADC, of "
-                "pulses within 0.5--1.5 times the beam peak with no neighbour "
-                "within \\SI{5}{\\micro\\second}, before and after correction, "
-                "and for isolated pulses (\\SI{0.5}{\\kilo\\hertz}), for two "
-                "behaviours of the baseline restorer: ideal, the true "
-                "baseline is subtracted; and conditional restart, the "
-                "firmware's with its LF limitation on, as in the $^{37}$Cl "
-                "runs, in which averaging resumes after the "
+  // Every caption is whole sentences, so each may end in a full stop.
+  table << Form("\\caption{The simulated rms pulse-height spread, in ADC, is "
+                "given for pulses within 0.5--1.5 times the beam peak with no "
+                "neighbour within \\SI{5}{\\micro\\second}, before and after "
+                "correction, and for isolated pulses "
+                "(\\SI{0.5}{\\kilo\\hertz}). Two behaviours of the baseline "
+                "restorer are compared: ideal, in which the true baseline is "
+                "subtracted, and conditional restart, the firmware's behaviour "
+                "with "
+                "its LF limitation on, as in the $^{37}$Cl runs, in which "
+                "averaging resumes after the "
                 "\\SI{%g}{\\micro\\second} freeze only once the trapezoid is "
                 "back near the baseline, simulated as within \\SI{%g}{ADC} "
                 "for \\SI{%g}{\\micro\\second}. The runs used "
@@ -976,25 +1002,48 @@ Bool_t ScoreReactions(const TString &path, const TString &label,
   return kTRUE;
 }
 
+// The physical rate of the simulated reactions per beam particle, from the
+// "# rate" line scripts/reaction_pairs.C ends the pairs file with; 0 if the
+// file has none.
+Double_t ReactionRate(const TString &pairsPath) {
+  std::ifstream in(pairsPath.Data());
+  std::string line;
+  while (std::getline(in, line)) {
+    const TString text = line.c_str();
+    if (text.BeginsWith("# rate "))
+      return TString(text(7, text.Length())).Atof();
+  }
+  return 0.0;
+}
+
+// A positive number as LaTeX math, a times a power of ten, with `digits`
+// significant digits: 1.647e-5 at 2 digits gives "1.6\times10^{-5}".
+TString LatexPower(Double_t value, Int_t digits) {
+  const Int_t exponent = Int_t(TMath::Floor(TMath::Log10(value)));
+  const Double_t mantissa = value / TMath::Power(10.0, exponent);
+  return Form("%.*f\\times10^{%d}", digits - 1, mantissa, exponent);
+}
+
 // The correction of reacted particles against truth, as a complete booktabs
 // table float with its caption and label (tab:reactions), for the paper to
-// \input (needs siunitx and amsmath).
+// \input (needs siunitx and amsmath). physicalRate is the reactions' rate per
+// beam particle that the 1 % is raised from.
 void ReactionTable(const std::vector<ReactionScore> &scores,
                    const RunInfo &runs, Double_t fraction,
-                   const TString &path) {
+                   Double_t physicalRate, const TString &path) {
   std::ofstream table(path.Data());
   table << "% Written by mains/figures.cpp; edit that, not this file."
         << std::endl;
   table << "\\begin{table}[htbp]" << std::endl;
   table << "\\centering" << std::endl;
-  table << Form("\\caption{Spread, in ADC, of the simulated pulse height "
-                "about the gain times the true amplitude, before and after "
-                "correction, for beam particles, reacted particles, and beam "
-                "particles whose previous pulse on the same strip was a "
+  table << Form("\\caption{The spread, in ADC, of the simulated pulse height "
+                "about the gain times the true amplitude is given before and "
+                "after correction for beam particles, reacted particles, and "
+                "beam particles whose previous pulse on the same strip was a "
                 "reacted one. Particles with another particle within "
                 "\\SI{5}{\\micro\\second} are left out; the gain is that of "
                 "the beam particles. \\SI{%g}{\\percent} of the particles "
-                "reacted, raised from about $2\\times10^{-5}$ for statistics; "
+                "reacted, a rate raised for statistics from the physical $%s$; "
                 "their deposits in the Long Strips are those of $(\\alpha,n)$ "
                 "and $(\\alpha,p)$ reactions in the $^{37}$Cl simulation, "
                 "weighted by their TALYS cross sections. The baseline "
@@ -1004,7 +1053,8 @@ void ReactionTable(const std::vector<ReactionScore> &scores,
                 "Long Strips, Right and \\SI{%g}{\\micro\\second} on the Long "
                 "Strips, Left, with $\\tau_{\\text{pz}} = "
                 "\\SI{%g}{\\micro\\second}$.}",
-                100.0 * fraction, runs.tauR_us, runs.tauL_us, runs.tauPz_us)
+                100.0 * fraction, LatexPower(physicalRate, 2).Data(),
+                runs.tauR_us, runs.tauL_us, runs.tauPz_us)
         << std::endl;
   table << "\\label{tab:reactions}" << std::endl;
   // Scoped by the table; without them the tabular overflows the text width of
@@ -1102,13 +1152,12 @@ void BandTable(const ReadingSpreads &single, const ReadingSpreads &banded,
                                "five", "six", "seven", "eight", "nine"};
   const TString count =
       kNBands < 10 ? TString(words[kNBands]) : TString::Format("%d", kNBands);
-  table << Form("\\caption{Rms pulse-height spread, in percent of the beam "
-                "peak, of pulses within 0.5--1.5 times the beam peak with no "
-                "other pulse on the same strip within "
-                "\\SI{5}{\\micro\\second}, "
-                "before correction and after it with one kernel and with one "
-                "kernel for each of %s bands of the previous pulse height, "
-                "below 0.5, ",
+  table << Form("\\caption{The rms pulse-height spread, in percent of the "
+                "beam peak, is given for pulses within 0.5--1.5 times the beam "
+                "peak with no other pulse on the same strip within "
+                "\\SI{5}{\\micro\\second}, before correction and after it with "
+                "one kernel and with one kernel for each of %s bands of the "
+                "previous pulse height: below 0.5, ",
                 count.Data());
   for (Int_t b = 1; b < kNBands - 1; b++)
     table << Form("%g--%g, ", b - 0.5, b + 0.5);
@@ -1393,6 +1442,114 @@ void StripSpectraFigure(const TString &file, Bool_t corrected) {
   delete canvas;
 }
 
+// ------------------------------------------------- reaction events (37Cl)
+// What scripts/reaction_events.sh collects from MUSIC's own outputs: the
+// reaction events the production analysis tagged and its pure-beam sample,
+// with and without the correction (the latter from scripts/nocorrection.sh,
+// MUSIC's pipeline with the correction off). The figure shows a few events of
+// each, of one reaction strip, the one MUSIC's own strip-sum plot shows.
+const Int_t kReactionStrip = 3;
+const Int_t kShownEvents = 10;
+const Int_t kReactionColour = kOrange + 7;
+const Int_t kBeamColour = kGray + 2;
+
+// The events tagged in reaction strip `reac`, or the pure beam for reac = -1:
+// each strip's calibrated deposit before ([0]) or after ([1]) the
+// correction. Events that are not complete without the correction are left
+// out of both, so the two hold the same events.
+Bool_t ReadReactionTraces(const TString &file, Int_t reac,
+                          std::vector<std::vector<Float_t>> traces[2]) {
+  TFile in(file, "READ");
+  TTree *tree = in.IsZombie() ? nullptr : (TTree *)in.Get("events");
+  if (!tree) {
+    std::cerr << "no events tree in " << file
+              << " (run scripts/reaction_events.sh)" << std::endl;
+    return kFALSE;
+  }
+  const Int_t nStrips = 18;
+  Float_t raw[nStrips], corrected[nStrips];
+  Int_t strip = 0, rawFound = 0;
+  tree->SetBranchAddress("raw", raw);
+  tree->SetBranchAddress("corrected", corrected);
+  tree->SetBranchAddress("reac", &strip);
+  tree->SetBranchAddress("raw_found", &rawFound);
+  for (Int_t v = 0; v < 2; v++)
+    traces[v].clear();
+  for (Long64_t i = 0; i < tree->GetEntries(); i++) {
+    tree->GetEntry(i);
+    if (!rawFound || strip != reac)
+      continue;
+    traces[0].push_back(std::vector<Float_t>(raw, raw + nStrips));
+    traces[1].push_back(std::vector<Float_t>(corrected, corrected + nStrips));
+  }
+  return !traces[1].empty();
+}
+
+// kShownEvents of a set of traces, spread evenly through it (and so through
+// the runs), each as a line over the strips. Returns the last, for the
+// legend.
+TGraph *DrawTraces(const std::vector<std::vector<Float_t>> &traces,
+                   Int_t firstStrip, Int_t lastStrip, Int_t colour) {
+  const size_t n = traces.size();
+  const size_t shown = TMath::Min(size_t(kShownEvents), n);
+  TGraph *event = nullptr;
+  for (size_t k = 0; k < shown; k++) {
+    const std::vector<Float_t> &trace = traces[k * n / shown];
+    event = new TGraph();
+    for (Int_t s = firstStrip; s <= lastStrip; s++)
+      event->SetPoint(event->GetN(), s, trace[s]);
+    event->SetLineColor(colour);
+    event->SetLineWidth(PlottingUtils::GetLineWidth());
+    event->Draw("L SAME");
+  }
+  return event;
+}
+
+// (Fig. reactions) kShownEvents of the events tagged in reaction strip
+// kReactionStrip and kShownEvents of MUSIC's pure-beam events, strip by
+// strip, before or after the correction: the same events in both.
+void ReactionTracesFigure(const TString &file, Bool_t corrected) {
+  std::vector<std::vector<Float_t>> reactions[2], beam[2];
+  if (!ReadReactionTraces(file, kReactionStrip, reactions) ||
+      !ReadReactionTraces(file, -1, beam))
+    return;
+  const Int_t v = corrected ? 1 : 0;
+  const Int_t firstStrip = 1, lastStrip = 16;
+  const Double_t yLo = 0.2, yHi = 1.6;
+
+  TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
+  Frame(canvas, firstStrip - 0.5, yLo, lastStrip + 0.5, yHi, "Strip",
+        "#DeltaE [a.u.]");
+  TGraph *beamLine = DrawTraces(beam[v], firstStrip, lastStrip, kBeamColour);
+  TGraph *reactionLine =
+      DrawTraces(reactions[v], firstStrip, lastStrip, kReactionColour);
+  TimeMark(kReactionStrip, yLo, yHi);
+  canvas->RedrawAxis();
+
+  std::vector<TString> labels;
+  labels.push_back("Beam");
+  labels.push_back(Form("(#alpha,n) in Strip %d", kReactionStrip));
+  TLegend *legend = Legend(labels, 0.73, 0.87);
+  legend->AddEntry(beamLine, labels[0], "l");
+  legend->AddEntry(reactionLine, labels[1], "l");
+  legend->Draw();
+  PlottingUtils::AddText(corrected ? "After Correction" : "Before Correction",
+                         0.88, 0.92);
+  PanelLabel(corrected ? "(b)" : "(a)");
+  PlottingUtils::SaveFigure(
+      canvas, corrected ? "reaction_traces_after" : "reaction_traces_before",
+      "", PlotSaveOptions::kLINEAR);
+  delete canvas;
+  std::cout << Form("reaction traces (%s): %d of %zu events in strip %d, %d "
+                    "of %zu beam events",
+                    corrected ? "after" : "before",
+                    Int_t(TMath::Min(size_t(kShownEvents), reactions[v].size())),
+                    reactions[v].size(), kReactionStrip,
+                    Int_t(TMath::Min(size_t(kShownEvents), beam[v].size())),
+                    beam[v].size())
+            << std::endl;
+}
+
 Bool_t HaveInput(const TString &file, const char *figure) {
   if (!gSystem->AccessPathName(file))
     return kTRUE;
@@ -1424,7 +1581,8 @@ int main(int argc, char **argv) {
   TString spreadDir = "output/spread";
   TString reactionDir = "output/reactions";
   TString run97 = "output/run97/run97.root";
-  TString long1 = "output/figures/long_1kHz.root";
+  TString reactionEvents = "output/reaction_events/reaction_events.root";
+  TString long10 = "output/figures/long_10kHz.root";
   TString long40 = "output/figures/long_40kHz.root";
   PlotSaveFormat format = PlotSaveFormat::kPNGAndPDF;
   for (Int_t i = 1; i < argc; i++) {
@@ -1437,8 +1595,10 @@ int main(int argc, char **argv) {
       reactionDir = argument(12, argument.Length() - 12);
     else if (argument.BeginsWith("--run97="))
       run97 = argument(8, argument.Length() - 8);
-    else if (argument.BeginsWith("--long1="))
-      long1 = argument(8, argument.Length() - 8);
+    else if (argument.BeginsWith("--reaction-events="))
+      reactionEvents = argument(18, argument.Length() - 18);
+    else if (argument.BeginsWith("--long10="))
+      long10 = argument(9, argument.Length() - 9);
     else if (argument.BeginsWith("--long40="))
       long40 = argument(9, argument.Length() - 9);
     else if (argument == "--format=png")
@@ -1452,10 +1612,10 @@ int main(int argc, char **argv) {
   PoleZeroFigure();
   SinglePulseFigure();
   PileupPairFigure();
-  if (HaveInput(long1, "spectrum_1kHz"))
-    SpectrumFigure(long1, "1kHz");
+  if (HaveInput(long10, "spectrum_10kHz"))
+    SpectrumFigure(long10, "10 kHz", "spectrum_10kHz", "(a)");
   if (HaveInput(long40, "spectrum_40kHz"))
-    SpectrumFigure(long40, "40kHz");
+    SpectrumFigure(long40, "40 kHz", "spectrum_40kHz", "(b)");
 
   if (HaveInput(run97, "kernel_run97")) {
     std::vector<std::vector<Double_t>> kernels = ReadKernels(run97);
@@ -1548,8 +1708,15 @@ int main(int argc, char **argv) {
         fraction = runFraction;
       }
     }
+    const Double_t physicalRate = ReactionRate(reactionDir + "/pairs.txt");
+    if (haveReactions && !(physicalRate > 0.0)) {
+      std::cout << "skipping reaction_table: no \"# rate\" line in "
+                << reactionDir << "/pairs.txt (rerun "
+                << "scripts/reaction_inputs.sh)" << std::endl;
+      haveReactions = kFALSE;
+    }
     if (haveReactions)
-      ReactionTable(scores, reactionRuns, fraction,
+      ReactionTable(scores, reactionRuns, fraction, physicalRate,
                     out + "/reaction_table.tex");
   }
 
@@ -1560,6 +1727,9 @@ int main(int argc, char **argv) {
     if (format != PlotSaveFormat::kPNG)
       FwhmMacros(run97, out + "/run97_fwhm.tex");
   }
+  if (HaveInput(reactionEvents, "reaction figures"))
+    for (Int_t corrected = 0; corrected < 2; corrected++)
+      ReactionTracesFigure(reactionEvents, corrected);
   if (format == PlotSaveFormat::kPNGAndPDF)
     MovePngs(out);
   return 0;

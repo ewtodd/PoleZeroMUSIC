@@ -11,7 +11,7 @@ the outputs of the 37Cl analysis.
 
 ```
 nix build                       # -> result/bin/{figures,simulate}
-bash scripts/spectra_inputs.sh  # regenerate the 1/40 kHz spectra inputs
+bash scripts/spectra_inputs.sh  # regenerate the 10/40 kHz spectra inputs
 bash scripts/spread_inputs.sh   # regenerate the spread-table runs
 bash scripts/reaction_inputs.sh # runs with reacted particles, in output/reactions
 ./result/bin/figures            # PDFs and the table in doc/figs, PNGs in doc/figs/png
@@ -28,8 +28,8 @@ need it updated first.
 
 ```
 figures [--spread=<dir>] [--reactions=<dir>]
-        [--run97=<run97.root>]
-        [--long1=<long_1kHz.root>] [--long40=<long_40kHz.root>]
+        [--run97=<run97.root>] [--reaction-events=<reaction_events.root>]
+        [--long10=<long_10kHz.root>] [--long40=<long_40kHz.root>]
         [--out=doc/figs] [--format=pdf|png]
 ```
 
@@ -40,7 +40,8 @@ With no arguments it reads
 | `--spread` | `output/spread` | the spread-table runs, `<reading>_r<rate>.root` |
 | `--reactions` | `output/reactions` | the reaction-table runs, `<reading>_r<rate>.root` |
 | `--run97` | `output/run97/run97.root` | what `scripts/run97_figure.sh` measures on run 97: the kernels, the before/after profiles, the strip spectra and their FWHM, and the band spreads |
-| `--long1` | `output/figures/long_1kHz.root` | the 1 kHz simulated hits, left matched, right mismatched |
+| `--reaction-events` | `output/reaction_events/reaction_events.root` | what `scripts/reaction_events.sh` collects from MUSIC's outputs: its tagged reaction events and pure-beam events, with and without the correction |
+| `--long10` | `output/figures/long_10kHz.root` | the 10 kHz simulated hits, left matched, right mismatched |
 | `--long40` | `output/figures/long_40kHz.root` | the 40 kHz simulated hits, left matched, right mismatched |
 
 A figure whose input is missing is skipped, so the previous file is left in
@@ -50,18 +51,18 @@ both, with the PNGs moved to `<out>/png/`.
 
 | File | Content |
 |---|---|
-| `trapezoid` | matched pole--zero output for one pulse |
+| `trapezoid` | matched pole-zero output for one pulse |
 | `polezero` | matched, under- and over-compensated tails |
 | `single` | one right-chain pulse with the 37Cl settings |
 | `pileup_pair` | a second pulse inside the baseline freeze, with the loss at its read point |
-| `spectrum_1kHz` / `spectrum_40kHz` | raw pulse-height spectra at the two rates, matched left against mismatched right |
-| `spectrum_1kHz_corrected` / `spectrum_40kHz_corrected` | the same spectra after the PulseHistory correction |
+| `spectrum_10kHz` / `spectrum_40kHz` | the two panels of one figure: pulse-height spectra at 10 and 40 kHz, matched left against mismatched right, before (dashed) and after (solid) the PulseHistory correction |
 | `spread_table.tex` | a complete table float, not a figure, with its caption and the label `tab:spread`: rms spread before and after correction at 10, 44 and 80 kHz for the two baseline readings (ideal, and the conditional restart of the firmware with `EnergyFilterLFLimitation` on), for the paper to `\input` (needs `siunitx`, `booktabs` and `amsmath`) |
 | `reaction_table.tex` | a table float like `spread_table.tex`, label `tab:reactions`: spread about the true amplitude, before and after correction, for beam particles, reacted particles and beam particles right after a reacted one |
 | `kernel_run97` | the long-left, long-right and short-left kernels fitted on run 97 |
 | `run97_deviation_R` | run 97 long-right profile before and after correction |
 | `run97_spectra` / `run97_spectra_corrected` | run 97's strip DeltaE spectra (the segmented strips S1-S16, each in units of its beam peak) before and after the correction, as MUSIC's events summary draws them |
 | `run97_fwhm.tex` | LaTeX macros for the text, not a float: the strips' beam-peak FWHM in percent of the peak, before and after the correction, for the strips whose long segment the right chain reads (`\FwhmLongRightBefore`, `\FwhmLongRightAfter`) and those whose long segment the left chain reads (`\FwhmLongLeft...`), each the mean over those strips, with `Min`/`Max` variants for the narrowest and widest |
+| `reaction_traces_before` / `reaction_traces_after` | ten events MUSIC tagged as reactions in strip 3 and ten of its pure-beam events, strip by strip, before and after the correction (the same events in both) |
 | `band_table.tex` | a table float like `spread_table.tex`, label `tab:bands`: the spread before correction and after it with one kernel and with four amplitude bands, for the runs of the spread table and for run 97, in percent of the beam peak |
 
 The filter-response figures use unit-amplitude pulses, so their vertical
@@ -69,8 +70,8 @@ scales are in arbitrary units. They use the DPP-PHA settings of the 37Cl runs
 97-137 (board 66222): 8 ns samples, 2 us rise, 3 us flat top, 20 us pole-zero,
 50 % peaking, 7 us baseline holdoff. They are constants at the top of
 `mains/figures.cpp`. The spectra read the simulated `hits` trees and fill all
-non-pileup hits; each run measures its own PulseHistory kernel before the
-corrected spectrum is drawn. `scripts/spectra_inputs.sh` regenerates those
+non-pileup hits; each run measures its own PulseHistory kernel for the
+corrected spectra. `scripts/spectra_inputs.sh` regenerates those
 inputs with the left chain at `tauL = 20 us`, matched to the 20 us pole-zero.
 
 `spread_table.tex` gives the rms of non-pileup pulses within 0.5-1.5 times the
@@ -85,15 +86,17 @@ upstream of the two long ends (`simulate --reactionFraction --reactionPairs`).
 Their deposits come from MUSIC's 37Cl simulation: `scripts/reaction_pairs.C`
 takes the (alpha,n) and (alpha,p) events reacting in strips 2-8 and every
 long-left / long-right neighbour pair at or after the reaction, as ratios to
-the unreacted beam there, weighted by the TALYS cross sections. The physical
-rate is about 2e-5 per beam particle; the 1 % is for statistics. Reactions
-draw from their own random stream, so the beam is event for event that of the
-reaction-free runs of `scripts/spread_inputs.sh`. `reaction_table.tex` scores
-these runs against truth: the spread of each height about its chain's gain
-times the true amplitude, the gain taken from the beam particles. Only
-particles with no other particle, recorded or not, within 5 us enter; the
-pileup flag knows only recorded triggers, so it lets merged double pulses
-through.
+the unreacted beam there, weighted by the TALYS cross sections. It also
+computes their physical rate per beam particle, the summed cross sections
+times the He areal density of one strip as MUSIC's `CrossSection.cpp` has it,
+and ends `pairs.txt` with it for the table caption; the 1 % is for
+statistics. Reactions draw from their own random stream, so the beam is event
+for event that of the reaction-free runs of `scripts/spread_inputs.sh`.
+`reaction_table.tex` scores these runs against truth: the spread of each height
+about its chain's gain times the true amplitude, the gain taken from the beam
+particles. Only particles with no other particle, recorded or not, within 5 us
+enter; the pileup flag knows only recorded triggers, so it lets merged double
+pulses through.
 
 `band_table.tex` compares the production kernel, one per channel group, with
 one kernel per band of the previous pulse height (`PULSE_HISTORY_AMP_BINS =
@@ -124,6 +127,37 @@ also keeps the long ends' mean trigger rate.
 
 ```
 bash scripts/run97_figure.sh
+```
+
+## Reaction events
+
+The reaction figure shows events MUSIC's 37Cl analysis tagged as reactions,
+and events of its pure-beam sample, with and without the correction: the
+same events in both, using MUSIC's own code throughout. Two steps, after the
+production 37Cl pipeline (its strip-sum-scatter cache must carry run numbers,
+cache v46):
+
+1. `scripts/nocorrection.sh` runs MUSIC's pipeline and reaction search with
+   the correction switched off, for the late epoch (runs 97-137), into
+   `output/nocorrection` (`MUSIC_RESULTS_DIR`): events, calibration,
+   summaries, plots, and a strip-sum-scatter cache with MUSIC's own tags on
+   uncorrected data. The production results are not touched; the pipeline
+   log it writes into the dataset directory is moved here and the production
+   one put back. About as long as a production run and about 25 GB.
+2. `scripts/reaction_events.sh` reads the production cache and the
+   no-correction events and writes
+   `output/reaction_events/reaction_events.root`: every tagged event's and
+   every pure-beam event's calibrated deposits with the correction (from
+   the cache) and without it (the same event, joined on run and grid seed
+   timestamp, read with MUSIC's `EnergyView`). A couple of minutes.
+
+Both build MUSIC's library from the local checkout and link their program to
+it.
+
+```
+bash scripts/nocorrection.sh
+bash scripts/reaction_events.sh
+./result/bin/figures
 ```
 
 ## Layout
