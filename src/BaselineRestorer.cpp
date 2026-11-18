@@ -4,22 +4,34 @@
 BaselineRestorer::BaselineRestorer(Int_t meanSamples, Bool_t lfOn,
                                    Double_t lfTauNs, Double_t samplePeriodNs,
                                    Double_t restartThr, Int_t restartHold,
-                                   Int_t refreezeSamples)
+                                   Int_t refreezeSamples, Int_t checkSamples)
     : window_(meanSamples > 0 ? meanSamples : 1, 0.0), pos_(0), count_(0),
       sum_(0.0), frozenUntil_(-1), lfOn_(lfOn && lfTauNs > 0.0),
       lfAlpha_(lfOn_ ? samplePeriodNs / (samplePeriodNs + lfTauNs) : 0.0),
       lfState_(0.0), restartThr_(restartThr), awaitingReturn_(kFALSE),
       restartHold_(restartHold > 0 ? restartHold : 1), inBand_(0),
-      refreezeSamples_(refreezeSamples > 0 ? refreezeSamples : 0) {}
+      refreezeSamples_(refreezeSamples > 0 ? refreezeSamples : 0),
+      recent_(checkSamples > 1 ? checkSamples : 1, 0.0), recentPos_(0),
+      recentCount_(0), recentSum_(0.0) {}
 
 void BaselineRestorer::Update(Long64_t n, Double_t trapezoid) {
+  // The recent samples for the end-of-freeze check, frozen or not.
+  const Int_t recentSize = Int_t(recent_.size());
+  if (recentCount_ >= recentSize)
+    recentSum_ -= recent_[recentPos_];
+  else
+    recentCount_++;
+  recent_[recentPos_] = trapezoid;
+  recentSum_ += trapezoid;
+  recentPos_ = (recentPos_ + 1) % recentSize;
   if (n < frozenUntil_)
     return;
   // No baseline exists yet to return to.
   if (awaitingReturn_ && count_ == 0)
     awaitingReturn_ = kFALSE;
   if (awaitingReturn_ && refreezeSamples_ > 0) {
-    if (TMath::Abs(trapezoid - Value()) > restartThr_) {
+    const Double_t checked = recentSum_ / Double_t(recentCount_);
+    if (TMath::Abs(checked - Value()) > restartThr_) {
       frozenUntil_ = n + refreezeSamples_;
       return;
     }
@@ -79,4 +91,8 @@ void BaselineRestorer::Reset() {
   lfState_ = 0.0;
   awaitingReturn_ = kFALSE;
   inBand_ = 0;
+  recent_.assign(recent_.size(), 0.0);
+  recentPos_ = 0;
+  recentCount_ = 0;
+  recentSum_ = 0.0;
 }

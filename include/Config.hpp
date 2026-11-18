@@ -58,6 +58,12 @@ struct Config {
   // another holdoff, and so on (CAEN support, 2026-10-19, for
   // EnergyFilterLFLimitation = On). baselineRestartHoldSamples is then unused.
   Bool_t baselineRefreeze = false;
+  // With baselineRefreeze, how many trapezoid samples decide the check at the
+  // end of each freeze: the mean of the last baselineCheckSamples must be
+  // within baselineRestartThrADC of the baseline. 1 is a single sample, which
+  // the trapezoid noise can carry into the band while a tail is still there;
+  // CAEN does not say which (2026-10-19).
+  Int_t baselineCheckSamples = 1;
   // Subtract the true baseline instead of the restorer's: what the trapezoid
   // gives for the ADC offset alone, with no pulses and no noise. Earlier
   // pulses then never enter the baseline, which isolates the trapezoid's
@@ -99,12 +105,6 @@ struct Config {
   Double_t rate_kHz = 40.0;
   Long64_t nEvents = 200000;
   UInt_t seed = 12345;
-  // Reactions: this fraction of particles react upstream of the two long ends,
-  // which then see a pair of deposits drawn from reactionPairs instead (lines
-  // "rL rR weight", in units of the beam peak, which scripts/reaction_inputs.sh
-  // writes from MUSIC's 37Cl simulation). 0 simulates the beam alone.
-  Double_t reactionFraction = 0.0;
-  TString reactionPairs = "";
   // Output ROOT file of the simulation (or input of the analysis).
   TString outputFile = "output/sim_40kHz.root";
   // Snippet selection: a pair of pulses with dt near this value is saved as

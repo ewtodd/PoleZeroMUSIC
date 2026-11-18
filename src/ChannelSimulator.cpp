@@ -13,7 +13,8 @@ ChannelSimulator::ChannelSimulator(const Config &cfg, Int_t channel,
       baseline_(cfg.BaselineWindowSamples(), cfg.lfFilterOn,
                 cfg.LfFilterTauNs(), cfg.samplePeriod_ns,
                 cfg.baselineRestartThrADC, cfg.baselineRestartHoldSamples,
-                cfg.baselineRefreeze ? cfg.HoldoffSamples() : 0),
+                cfg.baselineRefreeze ? cfg.HoldoffSamples() : 0,
+                cfg.baselineCheckSamples),
       resetSample_(0), nextEvent_(0),
       lastTriggerSample_(-1), lastTriggerTime_ns_(0.0), lastTriggerAmp_(0.0),
       snippetPair_(-1), snippetStart_(-1), snippetEnd_(-1),
@@ -83,7 +84,7 @@ void ChannelSimulator::HandleTriggers(Long64_t n) {
   while (nextEvent_ < events_.NEvents() && TriggerSample(nextEvent_) == n) {
     const Long64_t i = nextEvent_;
     nextEvent_++;
-    preamp_.AddEvent(events_.Time_ns(i), events_.ChannelAmplitude(i, channel_));
+    preamp_.AddEvent(events_.Time_ns(i), events_.Amplitude(i));
     if (lastTriggerSample_ >= 0 &&
         n - lastTriggerSample_ < cfg_.TriggerHoldoffSamples()) {
       dropped_++;
@@ -110,7 +111,7 @@ void ChannelSimulator::HandleTriggers(Long64_t n) {
     pending_.push_back(r);
     lastTriggerSample_ = n;
     lastTriggerTime_ns_ = events_.Time_ns(i);
-    lastTriggerAmp_ = events_.ChannelAmplitude(i, channel_);
+    lastTriggerAmp_ = events_.Amplitude(i);
   }
 }
 
@@ -131,11 +132,11 @@ void ChannelSimulator::HandleReadouts(Long64_t n, Double_t trap) {
     h.energy = r.sum / avg - r.frozenBaseline;
     h.dtPrev = r.dtPrev_us;
     h.dtNext = -1.0;
-    h.trueAmp = events_.ChannelAmplitude(r.eventIndex, channel_);
+    h.trueAmp = events_.Amplitude(r.eventIndex);
     h.prevTrueAmp = r.prevAmp;
     h.pileup = r.pileup;
     h.eventIndex = r.eventIndex;
-    h.reaction = events_.Reacted(r.eventIndex);
+    h.baseline = r.frozenBaseline - idealBaseline_;
     hits_.push_back(h);
   }
   pending_.resize(keep);

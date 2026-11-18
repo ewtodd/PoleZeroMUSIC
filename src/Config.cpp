@@ -70,6 +70,8 @@ Bool_t Config::ParseCommandLine(Int_t argc, char **argv) {
                              baselineRestartThrADC) ||
                  MatchInt(name, value, "baselineRestartHoldSamples",
                           baselineRestartHoldSamples) ||
+                 MatchInt(name, value, "baselineCheckSamples",
+                          baselineCheckSamples) ||
                  MatchDouble(name, value, "baselineHoldoff_ns",
                              baselineHoldoff_ns) ||
                 MatchInt(name, value, "warmupMarginSamples",
@@ -87,8 +89,6 @@ Bool_t Config::ParseCommandLine(Int_t argc, char **argv) {
                 MatchDouble(name, value, "noiseSigmaADC_L", noiseSigmaADC_L) ||
                 MatchDouble(name, value, "noiseSigmaADC_R", noiseSigmaADC_R) ||
                 MatchDouble(name, value, "rate_kHz", rate_kHz) ||
-                MatchDouble(name, value, "reactionFraction",
-                            reactionFraction) ||
                 MatchDouble(name, value, "snippetDt_us", snippetDt_us);
     if (!ok && name == "nEvents") {
       nEvents = Long64_t(std::atoll(value.Data()));
@@ -100,10 +100,6 @@ Bool_t Config::ParseCommandLine(Int_t argc, char **argv) {
     }
     if (!ok && name == "outputFile") {
       outputFile = value;
-      ok = kTRUE;
-    }
-    if (!ok && name == "reactionPairs") {
-      reactionPairs = value;
       ok = kTRUE;
     }
     if (!ok && name == "lfFilterOn") {
@@ -148,7 +144,7 @@ void Config::Print(std::ostream &os) const {
   os << "  baselineRestartThrADC = " << baselineRestartThrADC
      << " (hold " << baselineRestartHoldSamples << " samples)" << std::endl;
   os << "  baselineRefreeze     = " << (baselineRefreeze ? "true" : "false")
-     << std::endl;
+     << " (check " << baselineCheckSamples << " samples)" << std::endl;
   os << "  baselineIdeal        = " << (baselineIdeal ? "true" : "false")
      << std::endl;
   os << "  baselineHoldoff_ns   = " << baselineHoldoff_ns << std::endl;
@@ -166,8 +162,6 @@ void Config::Print(std::ostream &os) const {
   os << "  rate_kHz             = " << rate_kHz << std::endl;
   os << "  nEvents              = " << nEvents << std::endl;
   os << "  seed                 = " << seed << std::endl;
-  os << "  reactionFraction     = " << reactionFraction << std::endl;
-  os << "  reactionPairs        = " << reactionPairs << std::endl;
   os << "  outputFile           = " << outputFile << std::endl;
   os << "  snippetDt_us         = " << snippetDt_us << std::endl;
 }

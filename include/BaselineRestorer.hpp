@@ -25,12 +25,15 @@
 // With refreezeSamples > 0 the return is checked only once, at the end of
 // each freeze: if the trapezoid is not back within restartThr, the baseline
 // is frozen for another refreezeSamples, and so on. This is how CAEN support
-// describes EnergyFilterLFLimitation = On (2026-10-19).
+// describes EnergyFilterLFLimitation = On (2026-10-19). checkSamples is how
+// many trapezoid samples decide that check: the mean of the last
+// checkSamples, frozen or not, or the current sample alone for 1.
 class BaselineRestorer {
 public:
   BaselineRestorer(Int_t meanSamples, Bool_t lfOn, Double_t lfTauNs,
                    Double_t samplePeriodNs, Double_t restartThr = 0.0,
-                   Int_t restartHold = 1, Int_t refreezeSamples = 0);
+                   Int_t restartHold = 1, Int_t refreezeSamples = 0,
+                   Int_t checkSamples = 1);
   // Feed the trapezoid output of sample n. Ignored while frozen.
   void Update(Long64_t n, Double_t trapezoid);
   // Freeze from sample n for holdoffSamples; returns the frozen value.
@@ -56,6 +59,11 @@ private:
   Int_t restartHold_;
   Int_t inBand_;
   Int_t refreezeSamples_;
+  // The last checkSamples trapezoid samples, for the end-of-freeze check.
+  std::vector<Double_t> recent_;
+  Int_t recentPos_;
+  Int_t recentCount_;
+  Double_t recentSum_;
 };
 
 #endif
