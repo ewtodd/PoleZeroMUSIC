@@ -2,8 +2,7 @@
 # The run-97 figures of the paper, as PDF (doc/figs) and PNG (doc/figs/png):
 # the kernels PulseHistory fits, the pulse height against the time since the
 # previous pulse, and the strip spectra, the last two before and after the
-# correction; and run 97's part of the tables: the strips' beam-peak FWHM
-# (run97_fwhm.tex) and the run-97 values of band_macros.tex. Runs PulseHistory
+# correction; and the run-97 values of band_macros.tex. Runs PulseHistory
 # with the 37Cl configuration on the first run-97 file (about 2 GB of memory),
 # built against the local ~/MUSIC tooling, as production is, once as
 # production does and once with four amplitude bands, and keeps what it

@@ -1,9 +1,9 @@
 // PulseHistory on one 37Cl data file with the 37Cl configuration. Saves what
 // the run-97 figures and tables of the paper take (figures --run97): the group
 // kernels it fits, the pulse height against the time since the previous pulse
-// before and after the correction, the strip spectra and their beam-peak FWHM
-// before and after it, and the long groups' spread before correction and
-// after it with one and with four amplitude bands. Built and run by
+// before and after the correction, the strip spectra before and after it, and
+// the long groups' spread before correction and after it with one and with
+// four amplitude bands. Built and run by
 // scripts/run97_figure.sh, which compiles it against the 37Cl configuration
 // in ~/MUSIC; it is not part of the project build.
 //   run97_pulse_history <out.root> <label> <sol file>
@@ -123,56 +123,12 @@ Double_t BeamPeak(std::vector<Float_t> values) {
   return peak;
 }
 
-// A strip's beam-peak FWHM in percent of the peak position, from its
-// per-event values rather than the spectra's 0.02 a.u. bins, which are only a
-// few per peak width: binned at 0.2 % of the peak over 0.5-1.5 of it,
-// smoothed over five bins (1 %), with the half-maximum crossings interpolated
-// linearly. 0 when no peak is found.
-Double_t FwhmPercent(const std::vector<Float_t> &values, Double_t peak) {
-  if (!(peak > 0.0) || values.empty())
-    return 0.0;
-  const Double_t lo = 0.5, width = 0.002;
-  const Int_t nBins = 500, half = 2;
-  std::vector<Double_t> counts(nBins, 0.0);
-  for (size_t i = 0; i < values.size(); i++) {
-    const Int_t b = Int_t(TMath::Floor((values[i] / peak - lo) / width));
-    if (b >= 0 && b < nBins)
-      counts[b]++;
-  }
-  std::vector<Double_t> smooth(nBins, 0.0);
-  Int_t top = half;
-  for (Int_t b = half; b < nBins - half; b++) {
-    for (Int_t k = -half; k <= half; k++)
-      smooth[b] += counts[b + k] / (2 * half + 1);
-    if (smooth[b] > smooth[top])
-      top = b;
-  }
-  const Double_t halfMax = 0.5 * smooth[top];
-  Int_t left = top, right = top;
-  while (left > half && smooth[left] > halfMax)
-    left--;
-  while (right < nBins - half - 1 && smooth[right] > halfMax)
-    right++;
-  if (smooth[left] > halfMax || smooth[right] > halfMax)
-    return 0.0;
-  // Bin centres in units of the peak; each crossing lies between a bin below
-  // half maximum and its neighbour towards the top.
-  const Double_t xLeft =
-      lo + (left + 0.5) * width +
-      width * (halfMax - smooth[left]) / (smooth[left + 1] - smooth[left]);
-  const Double_t xRight =
-      lo + (right + 0.5) * width -
-      width * (halfMax - smooth[right]) / (smooth[right - 1] - smooth[right]);
-  return 100.0 * (xRight - xLeft) / (lo + (top + 0.5) * width);
-}
-
 // The strip spectra in units of each strip's own beam peak, as the
-// calibration anchors them, and each strip's beam-peak FWHM in percent.
+// calibration anchors them.
 void WriteStripSpectra(const std::vector<RawHit> &hits,
                        const std::vector<Double_t> &energy, const char *which) {
   std::vector<std::vector<Float_t>> totals;
   StripTotals(hits, energy, totals);
-  TVectorD fwhm(kNStrips);
   for (Int_t s = 0; s < kNStrips; s++) {
     const Double_t peak = BeamPeak(totals[s]);
     TH1D *spectrum = new TH1D(Form("strip_%s_S%d", which, s),
@@ -181,12 +137,10 @@ void WriteStripSpectra(const std::vector<RawHit> &hits,
       for (size_t i = 0; i < totals[s].size(); i++)
         spectrum->Fill(totals[s][i] / peak);
     spectrum->Write();
-    fwhm[s] = FwhmPercent(totals[s], peak);
-    std::cout << Form("  S%d %s: %zu events, beam peak %.0f ADC, FWHM %.2f %%",
-                      s, which, totals[s].size(), peak, fwhm[s])
+    std::cout << Form("  S%d %s: %zu events, beam peak %.0f ADC", s, which,
+                      totals[s].size(), peak)
               << std::endl;
   }
-  fwhm.Write(Form("fwhm_%s", which));
 }
 
 // The mean trigger rate of the long ends' channels, in kHz: each channel's
@@ -217,10 +171,12 @@ Double_t LongRateKHz(const std::vector<RawHit> &hits,
   return channels > 0 ? sum / channels : 0.0;
 }
 
-// The spread of each corrected group, in percent of each channel's beam peak,
-// for every set of energies: hits of the group's channels with no other hit
-// on the same channel within the trapezoid's 5 us, and within 0.5-1.5 times
-// the channel's beam peak in that set, as figures takes the simulated spread.
+// The spread of each corrected group for every set of energies: the rms of
+// the heights, each channel in units of its own beam peak so the channels pool,
+// in percent of their mean, as figures measures the simulated spread. Hits of
+// the group's channels with no other hit on the same channel within the
+// trapezoid's 5 us, and within 0.5-1.6 times the channel's beam peak (the
+// window PulseHistory selects its beam pulses in).
 // Returns [group][set] for the groups given.
 std::vector<std::vector<Double_t>>
 GroupSpreads(const std::vector<RawHit> &hits, const std::vector<Int_t> &groups,
@@ -255,7 +211,7 @@ GroupSpreads(const std::vector<RawHit> &hits, const std::vector<Int_t> &groups,
             !(mode[i] > 0.0))
           continue;
         const Double_t x = (*sets[k])[j] / mode[i];
-        if (x <= 0.5 || x >= 1.5)
+        if (x <= 0.5 || x >= 1.6)
           continue;
         n++;
         sum += x;
@@ -263,8 +219,9 @@ GroupSpreads(const std::vector<RawHit> &hits, const std::vector<Int_t> &groups,
       }
       const Double_t mean = n > 0.0 ? sum / n : 0.0;
       spreads[w][k] =
-          n > 0.0 ? 100.0 * TMath::Sqrt(TMath::Max(0.0, sum2 / n - mean * mean))
-                  : 0.0;
+          mean > 0.0
+              ? 100.0 * TMath::Sqrt(TMath::Max(0.0, sum2 / n - mean * mean)) / mean
+              : 0.0;
     }
   return spreads;
 }
@@ -376,20 +333,8 @@ int main(int argc, char **argv) {
   }
   WriteStripSpectra(hits, raw, "raw");
   WriteStripSpectra(hits, corrected, "corrected");
-  // Which chain reads each strip's long segment: 1 the right, 0 the left, -1
-  // for the unsegmented strips 0 and 17, from PulseHistory's group map.
-  TVectorD longRight(kNStrips);
-  for (Int_t s = 0; s < kNStrips; s++) {
-    const Int_t right = IndexOfName(Form("R%d", s));
-    longRight[s] =
-        (s == 0 || s == kNStrips - 1 || right < 0)
-            ? -1.0
-            : (groups[right] == PulseHistory::kLONG_RIGHT ? 1.0 : 0.0);
-  }
-  longRight.Write("strip_long_right");
-
   // Spread of the long groups before correction, with the production single
-  // band, and with four bands, in percent of each channel's beam peak.
+  // band, and with four bands, in percent of the mean height.
   std::vector<const std::vector<Double_t> *> sets;
   sets.push_back(&raw);
   sets.push_back(&corrected);

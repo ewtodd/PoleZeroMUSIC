@@ -35,7 +35,7 @@ With no arguments it reads
 | Option | Default | Contains |
 |---|---|---|
 | `--sim` | `output/sim` | the simulated runs of `scripts/sim_inputs.sh`, `<reading>_r<rate>.root` |
-| `--run97` | `output/run97/run97.root` | what `scripts/run97_figure.sh` measures on run 97: the kernels, the before/after profiles, the strip spectra and their FWHM, and the band spreads |
+| `--run97` | `output/run97/run97.root` | what `scripts/run97_figure.sh` measures on run 97: the kernels, the before/after profiles, the strip spectra, and the band spreads |
 | `--reaction-events` | `output/reaction_events/reaction_events.root` | what `scripts/reaction_events.sh` collects from MUSIC's outputs: its tagged reaction events and pure-beam events, with and without the correction |
 
 A figure whose input is missing is skipped, so the previous file is left in
@@ -51,12 +51,11 @@ both, with the PNGs moved to `<out>/png/`.
 | `spectrum_10kHz` / `spectrum_50kHz` | the two panels of one figure: simulated pulse-height spectra at 10 and 50 kHz, matched (left chain) against mismatched (right chain), before (dashed) and after (solid) the PulseHistory correction, with the running-average check |
 | `correction_kernel` | the kernels PulseHistory fits on the 50 kHz run with the running-average check, matched and mismatched chain, against the analytic kernel of Eq. (kerneltail) |
 | `spread_table.tex` | the simulated rms spread before and after correction at 10 and 50 kHz, matched and mismatched chain, for the two readings of the baseline check, in percent of the chain's own mean height. Not a figure: a table body (the tabular) for the paper to `\input` inside its own table float, which holds the caption and the label `tab:spread` (needs `siunitx`, `booktabs` and `amsmath`); a comment line at its top gives what the caption needs from the runs |
-| `band_macros.tex` | LaTeX macros for the text, not a float: the spread of the mismatched chain before correction, with one kernel and with one kernel per bin of the previous pulse height (four bins), on the 50 kHz run with the running-average check and on run 97's Long Strips, Right (`\BandSim...`, `\BandRun...`) |
-| `run70_baseline.tex` | LaTeX macros for the text, written by `scripts/run70_baseline.sh`: what run 70's waveforms show of the baseline restorer (`\RunSeventy...`) |
+| `band_macros.tex` | LaTeX macros for the text, not a float: the spread of run 97's Long Strips, Right before correction, with one kernel and with one kernel per bin of the previous pulse height (four bins), and the long ends' rate (`\BandCount`, `\BandRun...`) |
+| `run70_baseline_change` | the mean change of the firmware baseline between consecutive pulses on the Long Strips, Right of run 70 (the paper's 37Cl diagnostic run), against the time between them, with CAEN's description at 10, 20 and 80 ADC and with no check; from `output/run70/run70_baseline.root` (`scripts/run70_baseline.sh`) |
 | `kernel_run97` | the long-left, long-right and short-left kernels fitted on run 97 |
 | `run97_deviation_R` | run 97 long-right profile before and after correction, to 40 us between pulses |
-| `run97_spectra` / `run97_spectra_corrected` | run 97's strip DeltaE spectra (the segmented strips S1-S16, each in units of its beam peak) before and after the correction, as MUSIC's events summary draws them; two separate figures, without panel letters |
-| `run97_fwhm.tex` | LaTeX macros for the text, not a float: the strips' beam-peak FWHM in percent of the peak, before and after the correction, for the strips whose long segment the right chain reads (`\FwhmLongRightBefore`, `\FwhmLongRightAfter`) and those whose long segment the left chain reads (`\FwhmLongLeft...`), each the mean over those strips, with `Min`/`Max` variants for the narrowest and widest |
+| `run97_spectra` / `run97_spectra_corrected` | run 97's strip DeltaE spectra (the segmented strips S1-S16, each in units of its beam peak) before and after the correction, as MUSIC's events summary draws them; the two panels (a) and (b) of one figure |
 | `reaction_traces_before` / `reaction_traces_after` | ten events MUSIC tagged as (α,n) in strip 3 and ten of its pure-beam events, strip by strip, before and after the correction (the same events in both) |
 
 The filter-response figures use unit-amplitude pulses, so their vertical
@@ -86,25 +85,28 @@ CAEN does not say how close, nor what decides the check, so two readings:
 The 20 ADC comes from run 70 (below). Each hit carries the frozen baseline it
 was read against, relative to the ideal one (`baseline` branch). The spectra
 fill all non-pileup hits; each run measures its own PulseHistory kernel.
-`spread_table.tex` gives the rms of non-pileup pulses within 0.5-1.5 times the
+`spread_table.tex` gives the rms of non-pileup pulses within 0.5-1.6 times the
 beam peak, in percent of the chain's mean height there, so the mismatched
 chain's gain does not enter.
 
-`band_macros.tex` compares the production kernel, one per channel group, with
-one kernel per band of the previous pulse height (`PULSE_HISTORY_AMP_BINS =
-4`: below 0.5, 0.5-1.5, 1.5-2.5 and above 2.5 times the beam peak), on the
-50 kHz run with the running-average check and on run 97.
+`band_macros.tex` compares, on run 97, the production kernel, one per channel
+group, with one kernel per band of the previous pulse height
+(`PULSE_HISTORY_AMP_BINS = 4`: below 0.5, 0.5-1.5, 1.5-2.5 and above 2.5 times
+the beam peak).
 
 ## Run-70 baseline
 
 Run 70 recorded waveforms with the trapezoid (`EnergyFilter`) as the second
-probe, before the preamp swap at run 74: both long groups read ~22 us preamps,
-the right group with a 10 us pole-zero (an overshoot after every pulse), the
-left with a 20 us one. `scripts/run70_baseline.sh` infers the firmware's
-baseline at each traced hit, the trapezoid at the reading point less the
-reported energy over its scale, and its change between consecutive hits on a
-channel. It fits CAEN's description to that change, for a range of thresholds
-and baseline windows, and writes `doc/figs/run70_baseline.tex` and
+probe, before the preamp swap at run 74, at about 3.5 kHz per long channel:
+the right group with a 10 us pole-zero (an overshoot after every pulse, its
+tail decaying with ~23 us, so the 25 us preamps), the left with a 20 us one,
+near matched. `scripts/run70_baseline.sh` infers the firmware's baseline at
+each traced hit, the trapezoid at the reading point less the reported energy
+over its scale, and its change between consecutive hits on a channel. It fits
+CAEN's description to that change, for a range of thresholds and baseline
+windows, prints that the two readings of the check fit it alike at the run's
+own baseline average (16384 samples), and writes
+`output/run70/run70_baseline.root` (the curves of `run70_baseline_change`) and
 `output/run70/baseline_change.png`. The extraction of the long-channel hits
 from `data_raw/run70.root` is kept in `output/run70/run70_hits.root`.
 
@@ -119,13 +121,11 @@ strip in units of its own beam peak, before and after the correction. The
 kernels do not come from the 37Cl pipeline log, so they follow the pinned
 PulseHistory even before that pipeline is rerun.
 
-It also keeps each strip's beam-peak FWHM, taken from the per-event values
-(0.2 % bins smoothed over 1 %, not the spectra's 0.02 a.u. bins), and which
-chain reads each strip's long segment, for `run97_fwhm.tex`. For
-`band_macros.tex` it corrects the file a second time with four amplitude
+For `band_macros.tex` it also corrects the file a second time with four amplitude
 bands. It then keeps the long groups' spread before correction, with one band
 and with four bands: hits with no other hit on the same channel within 5 us,
-within 0.5-1.5 times the channel's beam peak, in percent of that peak. It
+within 0.5-1.6 times the channel's beam peak, each channel in units of its
+own peak, rms in percent of their mean as for the simulated runs. It
 also keeps the long ends' mean trigger rate.
 
 ```

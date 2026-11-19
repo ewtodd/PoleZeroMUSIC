@@ -1,9 +1,12 @@
 // Step 2 of scripts/run70_baseline.sh: what run 70's waveforms say about the
 // DPP-PHA baseline restorer with EnergyFilterLFLimitation = On.
 //
-// In run 70 both long groups read ~22 us preamps; the right group ran a 10 us
-// pole-zero, so its trapezoid overshoots after each pulse, and the left group
-// a 20 us one, near matched. For every traced hit the firmware's baseline is
+// In run 70 (per its XSetting file) the right long group ran a 10 us
+// pole-zero and the left a 20 us one. The right group's trapezoid overshoots
+// after each pulse, its tail decaying with the preamps' ~23 us (measured
+// below); the left group's is near matched, its tail too small for a decay
+// time. The preamps' own decay times are not recorded. For every traced hit
+// the firmware's baseline is
 // B = trapezoid at the reading point - e / k, the trapezoid taken from the
 // EnergyFilter probe (not baseline-subtracted) and k the energy scale. Both are
 // found here on isolated hits (no hit on the channel in the previous 300 us):
@@ -24,7 +27,9 @@
 // extended past the record by an exponential fitted at 18-31 us. thr is in
 // probe units, close to ADC (k ~ 1).
 //
-// Writes LaTeX macros for the paper's text and a plot of dB against dt.
+// Writes a plot of dB against dt and, for the paper's figure (figures
+// --run70), the right group's points and CAEN's description at a few
+// thresholds.
 #include <TAxis.h>
 #include <TCanvas.h>
 #include <TF1.h>
@@ -76,8 +81,8 @@ struct Pair {
 };
 } // namespace
 
-void run70_baseline(const char *hitsPath, const char *macroPath,
-                    const char *plotPath) {
+void run70_baseline(const char *hitsPath,
+                    const char *plotPath, const char *curvesPath) {
   TFile f(hitsPath);
   TTree *t = (TTree *)f.Get("hits");
   int ch, traced;
@@ -164,18 +169,13 @@ void run70_baseline(const char *hitsPath, const char *macroPath,
   const int nThr = sizeof(thrs) / sizeof(thrs[0]);
   const double Ws[] = {8.192, 32.768, 131.072};
   const int nW = 3;
+  // Run 70's own baseline average, EnergyFilterBaselineAvg = High: 16384
+  // samples of 8 ns. The paper's figure takes it; the other two lengths are
+  // printed for comparison only.
+  const int kRunW = 2;
   TCanvas canvas("c", "", 1500, 600);
   canvas.Divide(2, 1);
   std::vector<TObject *> keep;
-  std::ofstream macros(macroPath);
-  macros << "% Written by scripts/run70_baseline.C; edit that, not this file."
-         << std::endl;
-  macros << "% Run 70, right long group (10 us pole-zero on ~22 us preamps): the "
-            "firmware baseline change between consecutive hits on a channel, "
-            "against CAEN's description of LF limitation On. Thresholds in "
-            "trapezoid-probe units (~ADC). Chi2 is the best over the baseline "
-            "window lengths 8.2, 32.8, 131.1 us."
-         << std::endl;
   for (int g = 0; g < 2; g++) {
     std::vector<double> shape(NDS, 0);
     double nShape = 0;
@@ -271,14 +271,34 @@ void run70_baseline(const char *hitsPath, const char *macroPath,
       error[b] = k > 1 ? TMath::Sqrt((s2 / k - mean[b] * mean[b]) / k) : 1e9;
       centre[b] = k ? sx / k : 0;
     }
-    auto predict = [&](double thr, double Wus, double dt, double e1) {
+    // The trapezoid's mean over record times [a, b] us after its start, per
+    // unit energy (zero before it), from running sums on a 0.04 us grid.
+    const double gridStep = 0.04;
+    const int nGrid = 30000;
+    std::vector<double> cumulative(nGrid + 1, 0.0);
+    for (int q = 0; q < nGrid; q++)
+      cumulative[q + 1] = cumulative[q] + S(tStart + q * gridStep) * gridStep;
+    auto meanShape = [&](double a, double b) {
+      const int ia = TMath::Min(int(TMath::Max(a, 0.0) / gridStep), nGrid);
+      const int ib = TMath::Min(int(b / gridStep), nGrid);
+      return (cumulative[ib] - cumulative[ia]) / (b - a);
+    };
+    // checkUs = 0: the check compares the trapezoid's current value with the
+    // frozen baseline (single-sample check); otherwise the mean of its last
+    // checkUs, as the baseline average would be had it run (running-average
+    // check).
+    auto predictCheck = [&](double thr, double Wus, double dt, double e1,
+                            double checkUs) {
       const double step = 0.04; // us
       double tRun = -1;
       for (int m = 1; m < 200; m++) {
         const double tc = 7.0 * m;
         if (tc >= dt)
           break;
-        if (TMath::Abs(e1 * S(tStart + tc)) < thr) {
+        const double checked = checkUs > 0
+                                   ? e1 * meanShape(tc - checkUs, tc)
+                                   : e1 * S(tStart + tc);
+        if (TMath::Abs(checked) < thr) {
           tRun = tc;
           break;
         }
@@ -293,7 +313,10 @@ void run70_baseline(const char *hitsPath, const char *macroPath,
         sumLast += e1 * S(tStart + x);
       return sumLast * step / Wus;
     };
-    auto chi2 = [&](double thr, double W) {
+    auto predict = [&](double thr, double Wus, double dt, double e1) {
+      return predictCheck(thr, Wus, dt, e1, 0.0);
+    };
+    auto chi2Check = [&](double thr, double W, double checkUs) {
       double chi = 0;
       for (int b = 0; b < NB; b++) {
         if (count[b] < 20)
@@ -301,26 +324,25 @@ void run70_baseline(const char *hitsPath, const char *macroPath,
         double s = 0, k = 0;
         for (auto &p : pairs)
           if (p.dt >= edges[b] && p.dt < edges[b + 1]) {
-            s += predict(thr, W, p.dt, p.e1);
+            s += predictCheck(thr, W, p.dt, p.e1, checkUs);
             k++;
           }
         chi += TMath::Power((mean[b] - s / k) / error[b], 2);
       }
       return chi;
     };
+    auto chi2 = [&](double thr, double W) { return chi2Check(thr, W, 0.0); };
     int nBins = 0;
     for (int b = 0; b < NB; b++)
       if (count[b] >= 20)
         nBins++;
     printf("  chi2 over %d gap bins (7-400 us), threshold x window:\n", nBins);
-    std::vector<double> bestOverW(nThr, 1e99);
     double bestChi = 1e99, bestThr = 0, bestW = 0;
     for (int i = 0; i < nThr; i++) {
       printf("  thr %7.0f:", thrs[i]);
       for (int w = 0; w < nW; w++) {
         const double chi = chi2(thrs[i], Ws[w]);
         printf("  W %6.1f us %9.1f", Ws[w], chi);
-        bestOverW[i] = TMath::Min(bestOverW[i], chi);
         if (chi < bestChi) {
           bestChi = chi;
           bestThr = thrs[i];
@@ -329,37 +351,28 @@ void run70_baseline(const char *hitsPath, const char *macroPath,
       }
       printf("\n");
     }
-    if (g == 0) {
-      double maxGap = 0;
-      for (int b = 0; b < NB; b++)
-        if (count[b] >= 20)
-          maxGap = TMath::Max(maxGap, TMath::Abs(mean[b]) + error[b]);
-      auto at = [&](double thr) {
-        for (int i = 0; i < nThr; i++)
-          if (thrs[i] == thr)
-            return bestOverW[i];
-        return -1.0;
-      };
-      macros << Form("\\newcommand{\\RunSeventyPairs}{%zu}", pairs.size())
-             << std::endl;
-      macros << Form("\\newcommand{\\RunSeventyBins}{%d}", nBins) << std::endl;
-      macros << Form("\\newcommand{\\RunSeventyOvershoot}{%.0f}",
-                     100.0 * endOfFall)
-             << std::endl;
-      macros << Form("\\newcommand{\\RunSeventyMaxChange}{%.0f}", maxGap)
-             << std::endl;
-      macros << Form("\\newcommand{\\RunSeventyChiTen}{%.0f}", at(10))
-             << std::endl;
-      macros << Form("\\newcommand{\\RunSeventyChiTwenty}{%.0f}", at(20))
-             << std::endl;
-      macros << Form("\\newcommand{\\RunSeventyChiEighty}{%.0f}", at(80))
-             << std::endl;
-      macros << Form("\\newcommand{\\RunSeventyChiRestart}{%.0f}", at(1e6))
-             << std::endl;
-    }
+    // What Section 4.2 of the paper states: at this run's low rate the two
+    // readings of the check fit the data alike, so the run cannot tell them
+    // apart.
+    printf("  running-average check over the run's W (%.1f us): thr 10 %.1f, "
+           "thr 20 %.1f, thr 80 %.1f (single-sample: %.1f, %.1f, %.1f)\n",
+           Ws[kRunW], chi2Check(10, Ws[kRunW], Ws[kRunW]),
+           chi2Check(20, Ws[kRunW], Ws[kRunW]),
+           chi2Check(80, Ws[kRunW], Ws[kRunW]), chi2(10, Ws[kRunW]),
+           chi2(20, Ws[kRunW]), chi2(80, Ws[kRunW]));
 
     TGraphErrors *data = new TGraphErrors();
     TGraph *model = new TGraph(), *restart = new TGraph(), *restartShort = new TGraph();
+    // For the paper's figure (figures --run70): the right group's measured
+    // change and CAEN's description at the run's own baseline average, for
+    // the thresholds the text names and for no check at all.
+    const double kCurveThr[] = {10, 20, 80, 1e6};
+    const char *kCurveName[] = {"model_thr10", "model_thr20", "model_thr80",
+                                "model_nocheck"};
+    const int nCurves = 4;
+    std::vector<TGraph *> curves(nCurves);
+    for (int c = 0; c < nCurves; c++)
+      curves[c] = new TGraph();
     printf("  data against the best model (thr %.0f, W %.1f us):\n", bestThr, bestW);
     for (int b = 0; b < NB; b++) {
       if (count[b] < 20)
@@ -372,6 +385,13 @@ void run70_baseline(const char *hitsPath, const char *macroPath,
           s3 += predict(1e6, 8.192, p.dt, p.e1);
           k++;
         }
+      for (int c = 0; c < nCurves; c++) {
+        double sc = 0;
+        for (auto &p : pairs)
+          if (p.dt >= edges[b] && p.dt < edges[b + 1])
+            sc += predict(kCurveThr[c], Ws[kRunW], p.dt, p.e1);
+        curves[c]->SetPoint(curves[c]->GetN(), centre[b], sc / k);
+      }
       printf("   %6.1f-%-6.1f n %5.0f  dB %7.1f +- %4.1f  model %7.1f  restart "
              "after 7 us: %7.1f (W %.0f us), %7.1f (W 8.2 us)\n",
              edges[b], edges[b + 1], count[b], mean[b], error[b], s / k,
@@ -406,7 +426,13 @@ void run70_baseline(const char *hitsPath, const char *macroPath,
     legend->AddEntry(restartShort, "restart after 7 #mus, W 8.2 #mus", "l");
     legend->Draw();
     keep.insert(keep.end(), {data, model, restart, restartShort, legend});
+    if (g == 0) {
+      TFile out(curvesPath, "RECREATE");
+      data->Write("data");
+      for (int c = 0; c < nCurves; c++)
+        curves[c]->Write(kCurveName[c]);
+    }
   }
   canvas.SaveAs(plotPath);
-  printf("wrote %s and %s\n", macroPath, plotPath);
+  printf("wrote %s and %s\n", plotPath, curvesPath);
 }
