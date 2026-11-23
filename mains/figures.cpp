@@ -1134,10 +1134,9 @@ void Run70BaselineFigure(const TString &path) {
   canvas->RedrawAxis();
 
   std::vector<TString> labels;
-  labels.push_back("^{37}Cl Diagnostic Run");
+  labels.push_back("Diagnostic Run");
   for (Int_t c = 0; c < nCurves; c++)
     labels.push_back(curveLabel[c]);
-  // Rows tall enough that the superscript of the first one clears the box.
   TLegend *legend =
       Legend(labels, 0.87 - LegendHeight(5), 0.87, "", kTRUE, gLegendPx);
   legend->AddEntry(data, labels[0], "PE");
