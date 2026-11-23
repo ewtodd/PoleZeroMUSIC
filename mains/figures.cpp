@@ -158,65 +158,114 @@ TH1F *Frame(TVirtualPad *pad, Double_t x1, Double_t y1, Double_t x2,
   return frame;
 }
 
+// Text sizes in pixels on the standard 1200x800 canvas: the notes and
+// legends of the figures outside the paper (30 px), and the three levels of
+// the paper's figures: legends (34 px), in-figure annotations (38 px; in the
+// preprint they print at the body text's 12 pt), and axis titles and labels
+// (the style's 0.06 of the canvas's 800 px side).
+const Double_t kNotePx = 30.0;
+const Double_t kLegendPx = 34.0;
+const Double_t kAnnotationPx = 38.0;
+const Double_t kAxisTextPx = 48.0;
+
+// The text size of the paper's figures' legends: 34 px, or another with
+// --legend-px=, to compare. Each figure's room for its legend follows the
+// size.
+Double_t gLegendPx = kLegendPx;
+// The text size of the paper's in-figure annotations, corner notes and panel
+// letters: the style's 38 px, or another with --annotation-px=, to compare.
+Double_t gAnnotationPx = kAnnotationPx;
+Bool_t BigLegend() { return gLegendPx > 0.5 * (kNotePx + kAxisTextPx); }
+// A legend's height in NDC on the standard canvas, for rows of gLegendPx text
+// with 10 px between them, but never under the style's 50 px rows.
+Double_t LegendHeight(Int_t rows) {
+  return rows * TMath::Max(gLegendPx + 10.0, 50.0) / 800.0;
+}
+
+
+// A note in the top margin, at the annotations' size: right-aligned with
+// the frame's right edge and standing just above its top, so the larger text
+// clears the frame.
+TLatex *CornerText(const char *text) {
+  TLatex *label = PlottingUtils::AddText(text, 1.0 - gPad->GetRightMargin(),
+                                         1.0 - gPad->GetTopMargin() + 0.012);
+  label->SetTextFont(43);
+  label->SetTextSize(gAnnotationPx);
+  label->SetTextAlign(31);
+  return label;
+}
+
 // A legend inside the frame, sized to its labels and anchored a small inset
-// from the frame's right (or left) edge, wherever the pad's margins put it.
+// from the frame's right (or left) edge, wherever the pad's margins put it;
+// with several columns, each column is as wide as the widest label needs.
 TLegend *Legend(const std::vector<TString> &labels, Double_t y1, Double_t y2,
-                const TString &header = "", Bool_t left = kFALSE) {
-  const Double_t width =
-      PlottingUtils::LegendWidthPx(labels, header) / gPad->GetWw();
+                const TString &header = "", Bool_t left = kFALSE,
+                Double_t sizePx = kNotePx, Int_t columns = 1) {
+  const Double_t width = columns *
+                         PlottingUtils::LegendWidthPx(labels, header, sizePx) /
+                         gPad->GetWw();
   const Double_t inset = 0.02;
   const Double_t x2 = left ? gPad->GetLeftMargin() + inset + width
                            : 1.0 - gPad->GetRightMargin() - inset;
   TLegend *legend = PlottingUtils::AddLegend(x2 - width, x2, y1, y2);
   legend->SetFillStyle(1001);
+  legend->SetTextSize(sizePx);
+  if (columns > 1) {
+    legend->SetNColumns(columns);
+    // A column's symbol takes this share of the column, as in one column.
+    legend->SetMargin(0.25);
+  }
   if (!header.IsNull())
     legend->SetHeader(header);
   return legend;
 }
 
-void Reference(Double_t x1, Double_t x2, Double_t y) {
+void Reference(Double_t x1, Double_t x2, Double_t y,
+               Width_t width = PlottingUtils::GetLineWidth()) {
   TLine *line = new TLine(x1, y, x2, y);
   line->SetLineStyle(3);
   line->SetLineColor(kGray + 2);
-  line->SetLineWidth(PlottingUtils::GetLineWidth());
+  line->SetLineWidth(width);
   line->Draw();
 }
 
-void TimeMark(Double_t x, Double_t yLo, Double_t yHi) {
+void TimeMark(Double_t x, Double_t yLo, Double_t yHi,
+              Width_t width = PlottingUtils::GetLineWidth()) {
   TLine *line = new TLine(x, yLo, x, yHi);
   line->SetLineStyle(2);
   line->SetLineColor(kGray + 2);
-  line->SetLineWidth(PlottingUtils::GetLineWidth());
+  line->SetLineWidth(width);
   line->Draw();
 }
 
 void TimeArrow(Double_t x1, Double_t x2, Double_t y, Double_t textY,
-               const char *text) {
+               const char *text, Double_t sizePx = kNotePx,
+               Width_t width = PlottingUtils::GetLineWidth()) {
   TArrow *arrow = new TArrow(x1, y, x2, y, 0.012, "<|>");
-  arrow->SetLineWidth(PlottingUtils::GetLineWidth());
+  arrow->SetLineWidth(width);
   arrow->SetFillColor(kBlack);
   arrow->Draw();
   TLatex *label = new TLatex(0.5 * (x1 + x2), textY, text);
   label->SetTextFont(43);
-  label->SetTextSize(30);
+  label->SetTextSize(sizePx);
   label->SetTextAlign(21);
   label->Draw();
 }
 
 void Note(Double_t x, Double_t y, const char *text, Int_t align = 12,
-          Int_t colour = kBlack) {
+          Int_t colour = kBlack, Double_t sizePx = kNotePx) {
   TLatex *label = new TLatex(x, y, text);
   label->SetTextFont(43);
-  label->SetTextSize(30);
+  label->SetTextSize(sizePx);
   label->SetTextAlign(align);
   label->SetTextColor(colour);
   label->Draw();
 }
 
-void PanelLabel(const char *text) {
+void PanelLabel(const char *text, Double_t sizePx = gAnnotationPx) {
   TLatex *label = PlottingUtils::AddText(text, 0.02, 0.97);
   label->SetTextFont(63);
-  label->SetTextSize(36);
+  label->SetTextSize(sizePx);
   label->SetTextAlign(13);
 }
 
@@ -286,16 +335,20 @@ TGraph *RawPulse(Double_t tauPreUs, Double_t tMinUs, Double_t tMaxUs,
 }
 
 // (Fig. 1a) The matched trapezoid: flat top of height A, back to zero after
-// (k + l)T, with the energy read at t_m.
+// (k + l)T, with the energy read at t_m. Black and grey only; at the
+// annotations' size the curves are labelled where they run instead of in a
+// legend.
 void TrapezoidFigure() {
   const Double_t tauPre = 10.0;
   const Double_t kUs = kTrapRiseNs / 1000.0;
   const Double_t lUs = (kTrapRiseNs + kTrapFlatNs) / 1000.0;
   const Double_t endUs = kUs + lUs;
   const Double_t tm = kUs + kPeakingDelayNs / 1000.0;
-  const Double_t tMin = -1.0, tMax = 20.0;
-  const Double_t yLo = -0.1, yHi = 1.95;
-  const Double_t markTop = 1.15;
+  const Double_t tMin = -1.0, tMax = 12.0;
+  const Double_t yLo = -0.1, yHi = 2.5;
+  const Double_t markTop = 1.08;
+  const Width_t lineWidth = PlottingUtils::GetLineWidth();
+  const Double_t px = gAnnotationPx;
 
   std::vector<Double_t> one(1, 0.0);
   TGraph *out = StepResponse(tauPre, tauPre, one, tMin, tMax, 8);
@@ -312,18 +365,20 @@ void TrapezoidFigure() {
 
   PlottingUtils::ConfigureGraph(in, kGray + 2);
   in->SetLineStyle(2);
+  in->SetLineWidth(lineWidth);
   in->Draw("L SAME");
-  PlottingUtils::ConfigureGraph(out, kMatchedColour);
+  PlottingUtils::ConfigureGraph(out, kBlack);
+  out->SetLineWidth(lineWidth);
   out->Draw("L SAME");
   canvas->RedrawAxis();
 
-  Note(0.5 * kUs, 1.18, "rise", 21);
-  Note(0.5 * (kUs + lUs), 1.18, "flat top", 21);
-  Note(0.5 * (lUs + endUs), 1.18, "fall", 21);
-  TimeArrow(0.0, kUs, 1.40, 1.46, "#it{kT}");
-  TimeArrow(lUs, endUs, 1.40, 1.46, "#it{kT}");
-  TimeArrow(0.0, lUs, 1.58, 1.64, "#it{lT}: rise + flat top");
-  TimeArrow(0.0, endUs, 1.76, 1.82, "(#it{k}+#it{l})#it{T}: back to zero");
+  Note(0.5 * kUs, 1.12, "rise", 21, kBlack, px);
+  Note(0.5 * (kUs + lUs), 1.12, "flat top", 21, kBlack, px);
+  Note(0.5 * (lUs + endUs), 1.12, "fall", 21, kBlack, px);
+  TimeArrow(0.0, kUs, 1.50, 1.56, "#it{kT}", px, lineWidth);
+  TimeArrow(lUs, endUs, 1.50, 1.56, "#it{kT}", px, lineWidth);
+  TimeArrow(0.0, lUs, 1.86, 1.92, "#it{lT}", px, lineWidth);
+  TimeArrow(0.0, endUs, 2.22, 2.28, "(#it{k}+#it{l})#it{T}", px, lineWidth);
 
   TGraph *read = new TGraph(1);
   read->SetPoint(0, tm, out->Eval(tm));
@@ -331,20 +386,12 @@ void TrapezoidFigure() {
   read->SetMarkerSize(2.0);
   read->SetMarkerColor(kBlack);
   read->Draw("P SAME");
-  TLine *leader = new TLine(tm + 0.15, 1.04, endUs + 0.6, 1.10);
-  leader->SetLineWidth(PlottingUtils::GetLineWidth());
-  leader->Draw();
-  Note(endUs + 0.8, 1.10, "energy read at #it{t}_{m}", 12);
-  Note(endUs + 2.0, 0.12, "no tail:  #tau_{pz} = #tau_{pre}", 12);
+  Note(tm + 0.12, 0.12, "#it{t}_{m}", 12, kBlack, px);
 
-  std::vector<TString> labels;
-  labels.push_back("Preamplifier Output #it{v}(#it{t})");
-  labels.push_back("Filter Output #hat{#it{s}}(#it{t})");
-  TLegend *legend = Legend(labels, 0.70, 0.86);
-  legend->AddEntry(in, labels[0], "l");
-  legend->AddEntry(out, labels[1], "l");
-  legend->Draw();
-  PanelLabel("(a)");
+  Note(endUs + 0.6, 0.66, "preamplifier", 12, kBlack, px);
+  Note(endUs + 0.3, 0.16, "filter output", 12, kBlack, px);
+  Note(tMax - 0.5, 1.22, "#tau_{pz} = #tau_{pre}", 32, kBlack, px);
+  PanelLabel("(a)", px);
 
   PlottingUtils::SaveFigure(canvas, "trapezoid", "", PlotSaveOptions::kLINEAR);
   delete canvas;
@@ -362,7 +409,9 @@ void PoleZeroFigure() {
   const Double_t tauPz[nCases] = {20.0, 5.0};
   const Int_t colour[nCases] = {kRightColour, kLeftColour};
   const Double_t tMin = -1.0, tMax = 45.0;
-  const Double_t yLo = -0.45, yHi = 0.45;
+  const Double_t yLo = BigLegend() ? -0.62 : -0.45, yHi = 0.45;
+  const Width_t lineWidth = PlottingUtils::GetLineWidth();
+  const Double_t px = gAnnotationPx;
   std::vector<Double_t> one(1, 0.0);
 
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
@@ -375,6 +424,7 @@ void PoleZeroFigure() {
   for (Int_t v = 0; v < nCases; v++) {
     graphs[v] = StepResponse(tauPre, tauPz[v], one, tMin, tMax, 6);
     PlottingUtils::ConfigureGraph(graphs[v], colour[v]);
+    graphs[v]->SetLineWidth(lineWidth);
     graphs[v]->Draw("L SAME");
     labels.push_back(
         Form("#tau_{pz} = %.0f #mus,  %s", tauPz[v],
@@ -382,23 +432,27 @@ void PoleZeroFigure() {
   }
   canvas->RedrawAxis();
 
-  Note(endUs + 1.55, 0.31, "over-compensated", 10, colour[1]);
-  Note(endUs + 4, -0.14, "under-compensated", 13, colour[0]);
-  Note(endUs + 0.4, yLo + 0.06, "(#it{k}+#it{l})#it{T}", 10);
+  Note(endUs + 2.0, 0.37, "over-compensated", 12, colour[1], px);
+  Note(endUs + 6.0, -0.15, "under-compensated", 13, colour[0], px);
+  Note(endUs - 0.5, yLo + 0.04, "(#it{k}+#it{l})#it{T}", 31, kBlack, px);
 
-  TLegend *legend = Legend(labels, 0.16, 0.27);
+  TLegend *legend =
+      Legend(labels, 0.18, 0.18 + LegendHeight(2), "", kFALSE, gLegendPx);
   for (Int_t v = 0; v < nCases; v++)
     legend->AddEntry(graphs[v], labels[v], "l");
   legend->Draw();
-  PlottingUtils::AddText("#tau_{pre} = 10 #mus", 0.87, 0.84);
-  PanelLabel("(b)");
+  TLatex *tauNote = PlottingUtils::AddText("#tau_{pre} = 10 #mus", 0.87, 0.84);
+  tauNote->SetTextFont(43);
+  tauNote->SetTextSize(px);
+  PanelLabel("(b)", px);
 
   PlottingUtils::SaveFigure(canvas, "polezero", "", PlotSaveOptions::kLINEAR);
   delete canvas;
 }
 
-// (Fig. correction a) One pulse on the right chain (tau_pre = 10 us) through the 37Cl
-// settings (tau_pz = 20 us).
+// (Fig. correction a) One pulse on the right chain (tau_pre = 10 us) through
+// the 37Cl settings (tau_pz = 20 us), in black, as Fig. 1(a); the caption
+// gives the two decay times.
 void SinglePulseFigure() {
   const Double_t tauPre = 10.0;
   const Double_t kUs = kTrapRiseNs / 1000.0;
@@ -406,10 +460,12 @@ void SinglePulseFigure() {
   const Double_t endUs = kUs + lUs;
   const Double_t tm = kUs + kPeakingDelayNs / 1000.0;
   const Double_t tf = kBaselineHoldoffNs / 1000.0;
-  const Double_t tMin = -1.0, tMax = 20.0;
-  const Double_t yLo = -0.6, yHi = 2.0;
-  const Double_t markTop = 1.15;
+  const Double_t tMin = -1.0, tMax = 14.0;
+  const Double_t yLo = -0.6, yHi = 2.4;
+  const Double_t markTop = 1.08;
   const Double_t tail = TailAmplitude(tauPre, kPoleZeroUs, kUs, lUs);
+  const Double_t px = gAnnotationPx;
+  const Width_t lineWidth = PlottingUtils::GetLineWidth();
 
   std::vector<Double_t> one(1, 0.0);
   TGraph *out = StepResponse(tauPre, kPoleZeroUs, one, tMin, tMax, 8);
@@ -421,14 +477,18 @@ void SinglePulseFigure() {
   TimeMark(kUs, yLo, markTop);
   TimeMark(lUs, yLo, markTop);
   TimeMark(endUs, yLo, markTop);
-  PlottingUtils::ConfigureGraph(out, kRightColour);
+  PlottingUtils::ConfigureGraph(out, kBlack);
+  out->SetLineWidth(lineWidth);
   out->Draw("L SAME");
   canvas->RedrawAxis();
 
-  Note(0.5 * kUs, 1.18, "rise", 21);
-  Note(0.5 * (kUs + lUs), 1.18, "flat top", 21);
-  Note(0.5 * (lUs + endUs), 1.18, "fall", 21);
-  TimeArrow(0.0, tm, 1.42, 1.48, "#it{t}_{m}");
+  Note(0.5 * kUs, 1.12, "rise", 21, kBlack, px);
+  Note(0.5 * (kUs + lUs), 1.12, "flat top", 21, kBlack, px);
+  Note(0.5 * (lUs + endUs), 1.12, "fall", 21, kBlack, px);
+  TimeArrow(0.0, tm, 1.50, 1.58, "#it{t}_{m}", px, lineWidth);
+  // The freeze's label is wider than its arrow: left-aligned above it.
+  TimeArrow(0.0, tf, 1.90, 1.98, "", px, lineWidth);
+  Note(0.0, 1.98, "baseline frozen for #it{t}_{f}", 11, kBlack, px);
   TimeMark(tm, yLo, out->Eval(tm));
   TGraph *read = new TGraph(1);
   read->SetPoint(0, tm, out->Eval(tm));
@@ -436,21 +496,17 @@ void SinglePulseFigure() {
   read->SetMarkerSize(2.0);
   read->SetMarkerColor(kBlack);
   read->Draw("P SAME");
-  TLine *leader = new TLine(tm + 0.15, out->Eval(tm) + 0.03, endUs + 1.1, 0.95);
-  leader->SetLineWidth(PlottingUtils::GetLineWidth());
-  leader->Draw();
-  Note(endUs + 1.3, 0.95, "pulse height measured at #it{t}_{m}", 12);
   // A unit pulse: the height read is the gain g of the paper's Eq. (gain).
-  Note(endUs + 1.3, 0.77,
-       Form("#it{g} = #hat{#it{s}}_{1}(#it{t}_{m}) = %.2f", out->Eval(tm)), 12);
-  TimeArrow(0.0, tf, -0.50, -0.44, "baseline frozen for #it{t}_{f}");
-  Note(endUs + 1.5, -0.27,
-       Form("tail:  #hat{#it{s}} = #gamma "
-            "e^{#minus#kern[0.15]{#it{t}}/#tau_{pre}},  %s",
-            TailLabel(tail).Data()),
-       13, kRightColour);
-  PlottingUtils::AddText("#tau_{pre} = 10 #mus,  #tau_{pz} = 20 #mus", 0.87,
-                         0.84);
+  // The leader leaves the read point below the sloping flat top.
+  TLine *leader =
+      new TLine(tm + 0.2, out->Eval(tm) - 0.04, endUs + 0.2, 0.62);
+  leader->SetLineWidth(lineWidth);
+  leader->Draw();
+  Note(endUs + 0.4, 0.62,
+       Form("#it{g} = #hat{#it{s}}_{1}(#it{t}_{m}) = %.2f", out->Eval(tm)), 12,
+       kBlack, px);
+  Note(endUs + 0.4, -0.38, Form("tail,  %s", TailLabel(tail).Data()), 12,
+       kBlack, px);
   PanelLabel("(a)");
 
   PlottingUtils::SaveFigure(canvas, "single", "", PlotSaveOptions::kLINEAR);
@@ -461,7 +517,8 @@ void SinglePulseFigure() {
 // right chain (tau_pre = 10 us) with an ideal baseline: the height read on the
 // last pulse is its height alone plus the tail each earlier pulse leaves at
 // that read point, kappa(dt_i) h~_i with h~_i the earlier pulse's height alone
-// (the paper's Eq. (kernel)).
+// (the paper's Eq. (kernel)). Kept in its first design and colours, with the
+// paper's text sizes: annotations at gAnnotationPx, the legend at gLegendPx.
 void CorrectionTrainFigure() {
   const Double_t tauPre = 10.0;
   const Double_t tm = (kTrapRiseNs + kPeakingDelayNs) / 1000.0;
@@ -470,7 +527,8 @@ void CorrectionTrainFigure() {
   const Double_t amplitude[nPulses] = {1.0, 1.5, 0.8, 1.0};
   const Double_t tRead = arrival[last] + tm;
   const Double_t tMin = -1.0, tMax = 44.0;
-  const Double_t yLo = -0.7, yHi = 2.4;
+  const Double_t yLo = -0.7, yHi = 2.75;
+  const Double_t px = gAnnotationPx;
 
   const std::vector<Double_t> times(arrival, arrival + nPulses);
   const std::vector<Double_t> heights(amplitude, amplitude + nPulses);
@@ -505,12 +563,14 @@ void CorrectionTrainFigure() {
   for (Int_t i = 0; i < last; i++) {
     const Double_t h = alone[i]->Eval(arrival[i] + tm);
     earlierReads->SetPoint(i, arrival[i] + tm, h);
-    Note(arrival[i] + tm, h + 0.08, Form("#tilde{#it{h}}_{%d}", i + 1), 21);
-    const Double_t y = 1.65 + 0.24 * (last - 1 - i);
-    TimeArrow(arrival[i], arrival[last], y, y + 0.06,
-              Form("#Delta#it{t}_{%d}", i + 1));
+    Note(arrival[i] + tm, h + 0.10, Form("#tilde{#it{h}}_{%d}", i + 1), 21,
+         kBlack, px);
+    const Double_t y = 1.70 + 0.32 * (last - 1 - i);
+    TimeArrow(arrival[i], arrival[last], y, y + 0.07,
+              Form("#Delta#it{t}_{%d}", i + 1), px);
   }
-  TimeMark(tRead, yLo, alone[last]->Eval(tRead));
+  // The read time, from just below the tails, clear of their note.
+  TimeMark(tRead, -0.35, alone[last]->Eval(tRead));
 
   // At the last read point: the height alone, the height read, and the
   // tails that make up the difference.
@@ -550,19 +610,22 @@ void CorrectionTrainFigure() {
   leadShift->Draw();
   Note(xText, 0.5 * (yAlone + yRead),
        "#sum_{#it{i}} #kappa(#Delta#it{t}_{#it{i}}) #tilde{#it{h}}_{#it{i}}",
-       12);
-  const Double_t xTailText = tRead + 4.5, yTailText = -0.5;
+       12, kBlack, px);
+  // The tails' note right-aligned below the train, its leader from the lowest
+  // tail at the read point.
+  const Double_t xTailText = tMax - 0.5, yTailText = -0.5;
   TLine *leadTails = new TLine(tRead + 0.2, tails->GetY()[last - 1],
-                               xTailText - 0.2, yTailText);
+                               tRead + 1.2, yTailText + 0.10);
   leadTails->SetLineWidth(PlottingUtils::GetLineWidth());
   leadTails->Draw();
-  Note(xTailText, yTailText, "tails of pulses 1-3", 12);
+  Note(xTailText, yTailText, "tails of pulses 1-3", 32, kBlack, px);
 
   std::vector<TString> labels;
   labels.push_back("Measured");
   labels.push_back("Pulses 1-3 alone");
   labels.push_back("Pulse 4 alone");
-  TLegend *legend = Legend(labels, 0.66, 0.87);
+  TLegend *legend =
+      Legend(labels, 0.87 - LegendHeight(3), 0.87, "", kFALSE, gLegendPx);
   legend->AddEntry(train, labels[0], "l");
   legend->AddEntry(alone[0], labels[1], "l");
   legend->AddEntry(alone[last], labels[2], "l");
@@ -689,8 +752,9 @@ void DrawSpectra(const std::vector<SimHit> &hits,
   // applies the style, so the title offset has to be set afterwards.
   canvas->SetLeftMargin(0.18);
   const Int_t colour[2] = {kLeftColour, kRightColour};
-  // The dashed spectra first, so the corrected ones are drawn over them.
-  spectra[0][0]->SetMaximum(1.45 * yMax);
+  // The dashed spectra first, so the corrected ones are drawn over them. The
+  // top half of the frame is left for the legend.
+  spectra[0][0]->SetMaximum((BigLegend() ? 2.1 : 1.45) * yMax);
   PlottingUtils::ConfigureAndDrawHistogram(spectra[0][0], colour[0],
                                            ";Pulse Height [ADC];Counts");
   spectra[0][0]->GetYaxis()->SetTitleOffset(1.4);
@@ -715,13 +779,14 @@ void DrawSpectra(const std::vector<SimHit> &hits,
   labels.push_back("#tau_{pz} #neq #tau_{pre}");
   labels.push_back("Before Correction");
   labels.push_back("After Correction");
-  TLegend *legend = Legend(labels, 0.61, 0.87);
+  TLegend *legend =
+      Legend(labels, 0.87 - LegendHeight(4), 0.87, "", kFALSE, gLegendPx);
   legend->AddEntry(spectra[0][1], labels[0], "l");
   legend->AddEntry(spectra[1][1], labels[1], "l");
   legend->AddEntry(dashed, labels[2], "l");
   legend->AddEntry(solid, labels[3], "l");
   legend->Draw();
-  PlottingUtils::AddText(rateLabel, 0.88, 0.92);
+  CornerText(rateLabel);
   PanelLabel(panel);
   PlottingUtils::SaveFigure(canvas, name, "", PlotSaveOptions::kLINEAR);
   delete canvas;
@@ -839,20 +904,21 @@ void CorrectionKernelFigure(const TString &path, const TString &runLabel) {
   std::vector<TObject *> entries;
   std::vector<const char *> options;
   for (Int_t j = 0; j < nChains; j++) {
-    labels.push_back(Form("Fitted Kernel (%s)", name[j].Data()));
+    labels.push_back(Form("Fitted, %s", name[j].Data()));
     entries.push_back(fitted[j]);
     options.push_back("p");
     if (form[j]) {
-      labels.push_back(Form("Analytic Kernel (%s)", name[j].Data()));
+      labels.push_back(Form("Analytic, %s", name[j].Data()));
       entries.push_back(form[j]);
       options.push_back("l");
     }
   }
-  TLegend *legend = Legend(labels, 0.17, 0.17 + 0.06 * labels.size());
+  TLegend *legend = Legend(labels, 0.20, 0.20 + LegendHeight(labels.size()), "",
+                           kFALSE, gLegendPx);
   for (size_t e = 0; e < labels.size(); e++)
     legend->AddEntry(entries[e], labels[e], options[e]);
   legend->Draw();
-  PlottingUtils::AddText(runLabel, 0.88, 0.92);
+  CornerText(runLabel);
   PlottingUtils::SaveFigure(canvas, "correction_kernel", "",
                             PlotSaveOptions::kLINEAR);
   delete canvas;
@@ -1044,7 +1110,9 @@ void Run70BaselineFigure(const TString &path) {
               << " (rerun scripts/run70_baseline.sh)" << std::endl;
     return;
   }
-  const Double_t xLo = 6.0, xHi = 450.0, yLo = -15.0, yHi = 145.0;
+  // Room above the curves for the legend's five rows (more for large legends).
+  const Double_t xLo = 6.0, xHi = 450.0, yLo = -15.0,
+                 yHi = BigLegend() ? 185.0 : 145.0;
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   canvas->SetLogx();
   TH1F *frame = Frame(canvas, xLo, yLo, xHi, yHi, "Time Between Pulses [#mus]",
@@ -1066,11 +1134,12 @@ void Run70BaselineFigure(const TString &path) {
   canvas->RedrawAxis();
 
   std::vector<TString> labels;
-  labels.push_back("^{37}Cl Diagnostic Run, Long Strips, Right");
+  labels.push_back("^{37}Cl Diagnostic Run");
   for (Int_t c = 0; c < nCurves; c++)
     labels.push_back(curveLabel[c]);
   // Rows tall enough that the superscript of the first one clears the box.
-  TLegend *legend = Legend(labels, 0.59, 0.87, "", kTRUE);
+  TLegend *legend =
+      Legend(labels, 0.87 - LegendHeight(5), 0.87, "", kTRUE, gLegendPx);
   legend->AddEntry(data, labels[0], "PE");
   for (Int_t c = 0; c < nCurves; c++)
     legend->AddEntry(curves[c], labels[c + 1], "L");
@@ -1290,14 +1359,16 @@ void DeviationFigure(const TString &file) {
 }
 
 // Run 97's strip spectra before or after the correction, in units of each
-// strip's beam peak: the figure MUSIC's events summary draws, for the
-// segmented strips 1-16 only, with the side legend sized to its entries. The
-// paper shows the two as separate figures, so they carry no panel letter.
+// strip's beam peak, for the segmented strips 1-16, as panels (a) and (b) of
+// one paper figure. At the axis text size a legend of the sixteen strips does
+// not fit the frame, so the strips are coloured by parity, as the paper's text
+// compares them: odd strips, whose long segment is on the left, in the left
+// chain's colour, and even strips, whose long segment is on the right, in the
+// right chain's. The top of the log scale leaves room for the legend.
 void StripSpectraFigure(const TString &file, Bool_t corrected) {
   const Int_t firstStrip = 1;
   const Int_t nStrips = 16;
   std::vector<TH1D *> spectra;
-  std::vector<TString> labels;
   {
     TFile in(file, "READ");
     for (Int_t s = firstStrip; s < firstStrip + nStrips; s++) {
@@ -1311,58 +1382,46 @@ void StripSpectraFigure(const TString &file, Bool_t corrected) {
       TH1D *spectrum = (TH1D *)stored->Clone(PlottingUtils::GetRandomName());
       spectrum->SetDirectory(nullptr);
       spectra.push_back(spectrum);
-      labels.push_back(Form("S%d", s));
     }
   }
-  TPad *plot = nullptr;
-  TPad *legendPad = nullptr;
-  const Double_t legendWidthPx = PlottingUtils::LegendWidthPx(labels);
-  TCanvas *canvas = PlottingUtils::GetConfiguredCanvasWithSideLegend(
-      plot, legendPad, Int_t(legendWidthPx), 800, kTRUE);
-  const std::vector<Int_t> colours = PlottingUtils::GetDefaultColors();
+  // The log axis goes on a pad spanning the canvas, with the canvas's own
+  // margins, grid and ticks: saving with the linear option, as the paper's
+  // file names need, resets the canvas's own log axis.
+  TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
+  TPad *plot = new TPad(PlottingUtils::GetRandomName(), "", 0.0, 0.0, 1.0, 1.0);
+  plot->SetMargin(canvas->GetLeftMargin(), canvas->GetRightMargin(),
+                  canvas->GetBottomMargin(), canvas->GetTopMargin());
+  plot->SetGrid(canvas->GetGridx(), canvas->GetGridy());
+  plot->SetTicks(canvas->GetTickx(), canvas->GetTicky());
+  plot->SetLogy();
+  plot->Draw();
+  plot->cd();
   Double_t yMax = 0.0;
   for (Int_t s = 0; s < nStrips; s++)
     yMax = TMath::Max(yMax, spectra[s]->GetMaximum());
-  spectra[0]->SetMaximum(3.0 * yMax);
+  spectra[0]->SetMaximum((BigLegend() ? 100.0 : 3.0) * yMax);
   spectra[0]->SetMinimum(0.5);
-  PlottingUtils::ConfigureAndDrawHistogram(spectra[0], colours[0],
-                                           ";#DeltaE [a.u.];Counts");
-  for (Int_t s = 1; s < nStrips; s++) {
-    PlottingUtils::ConfigureHistogram(spectra[s],
-                                      colours[s % Int_t(colours.size())]);
-    spectra[s]->Draw("HIST SAME");
+  const Int_t parityColour[2] = {kRightColour, kLeftColour}; // even, odd
+  for (Int_t s = 0; s < nStrips; s++) {
+    const Int_t odd = (firstStrip + s) % 2;
+    if (s == 0)
+      PlottingUtils::ConfigureAndDrawHistogram(spectra[s], parityColour[odd],
+                                               ";#DeltaE [a.u.];Counts");
+    else {
+      PlottingUtils::ConfigureHistogram(spectra[s], parityColour[odd]);
+      spectra[s]->Draw("HIST SAME");
+    }
   }
   plot->RedrawAxis();
-  TLegend *legend = PlottingUtils::AddSideLegend(plot, legendPad, nStrips);
-  // Two corrections to AddSideLegend's box. Sixteen of its 50 px rows are
-  // taller than the frame, so the box would fill the canvas and cover the last
-  // x-axis label: fit it to the frame's height (both pads span the canvas
-  // height, so the frame's margins carry over). And it spans the whole legend
-  // pad, from the frame's right edge to the canvas edge, which also holds the
-  // plot's right margin: narrow it to the width its entries need, centred
-  // between the frame and the edge. ROOT paints a drawn legend from its pad
-  // coordinates, which in the axis-less legend pad equal NDC, so both are set.
-  const Double_t frameBottom = plot->GetBottomMargin();
-  const Double_t frameTop = 1.0 - plot->GetTopMargin();
-  const Double_t legendPadPx = legendPad->GetWw() * legendPad->GetAbsWNDC();
-  const Double_t boxWidth = legendWidthPx / legendPadPx;
-  const Double_t boxLeft = 0.5 * (1.0 - boxWidth);
-  const Double_t boxRight = boxLeft + boxWidth;
-  legend->SetX1NDC(boxLeft);
-  legend->SetX2NDC(boxRight);
-  legend->SetY1NDC(frameBottom);
-  legend->SetY2NDC(frameTop);
-  legend->SetX1(boxLeft);
-  legend->SetX2(boxRight);
-  legend->SetY1(frameBottom);
-  legend->SetY2(frameTop);
-  for (Int_t s = 0; s < nStrips; s++)
-    legend->AddEntry(spectra[s], labels[s], "l");
-  PlottingUtils::AddText(corrected ? "After Correction" : "Before Correction",
-                         0.88, 0.92);
-  // The two spectra are one figure in the paper; the label goes on the
-  // canvas, at its corner like the other panels', not in the plot pad.
-  canvas->cd();
+  std::vector<TString> labels;
+  labels.push_back("Odd Strips");
+  labels.push_back("Even Strips");
+  TLegend *legend =
+      Legend(labels, 0.87 - LegendHeight(2), 0.87, "", kFALSE, gLegendPx);
+  legend->AddEntry(spectra[0], labels[0], "l"); // S1
+  legend->AddEntry(spectra[1], labels[1], "l"); // S2
+  legend->Draw();
+  CornerText(corrected ? "After Correction" : "Before Correction");
   PanelLabel(corrected ? "(b)" : "(a)");
   PlottingUtils::SaveFigure(
       canvas, corrected ? "run97_spectra_corrected" : "run97_spectra", "",
@@ -1443,7 +1502,8 @@ void ReactionTracesFigure(const TString &file, Bool_t corrected) {
     return;
   const Int_t v = corrected ? 1 : 0;
   const Int_t firstStrip = 1, lastStrip = 16;
-  const Double_t yLo = 0.2, yHi = 1.6;
+  // Room above the traces for the legend (more for large legends).
+  const Double_t yLo = 0.2, yHi = BigLegend() ? 1.8 : 1.6;
 
   TCanvas *canvas = PlottingUtils::GetConfiguredCanvas(kFALSE);
   Frame(canvas, firstStrip - 0.5, yLo, lastStrip + 0.5, yHi, "Strip",
@@ -1457,12 +1517,12 @@ void ReactionTracesFigure(const TString &file, Bool_t corrected) {
   std::vector<TString> labels;
   labels.push_back("Beam");
   labels.push_back(Form("(#alpha,n) in Strip %d", kReactionStrip));
-  TLegend *legend = Legend(labels, 0.73, 0.87);
+  TLegend *legend =
+      Legend(labels, 0.87 - LegendHeight(2), 0.87, "", kFALSE, gLegendPx);
   legend->AddEntry(beamLine, labels[0], "l");
   legend->AddEntry(reactionLine, labels[1], "l");
   legend->Draw();
-  PlottingUtils::AddText(corrected ? "After Correction" : "Before Correction",
-                         0.88, 0.92);
+  CornerText(corrected ? "After Correction" : "Before Correction");
   PanelLabel(corrected ? "(b)" : "(a)");
   PlottingUtils::SaveFigure(
       canvas, corrected ? "reaction_traces_after" : "reaction_traces_before",
@@ -1866,6 +1926,10 @@ int main(int argc, char **argv) {
       reactionEvents = argument(18, argument.Length() - 18);
     else if (argument.BeginsWith("--run70="))
       run70 = argument(8, argument.Length() - 8);
+    else if (argument.BeginsWith("--annotation-px="))
+      gAnnotationPx = TString(argument(16, argument.Length() - 16)).Atof();
+    else if (argument.BeginsWith("--legend-px="))
+      gLegendPx = TString(argument(12, argument.Length() - 12)).Atof();
     else if (argument == "--format=png")
       format = PlotSaveFormat::kPNG;
     else if (argument == "--format=pdf")

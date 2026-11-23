@@ -43,11 +43,19 @@ place. `--format` writes one format straight into `--out`; the default writes
 both, with the PNGs moved to `<out>/png/`.
 ## Figures
 
+On the standard 1200x800 canvas, the paper's figures use three text sizes:
+axis text at the style's 48 px; in-figure annotations, corner notes and panel
+letters at 38 px, which print at the preprint's 12 pt body size; and legends at
+34 px. Lines keep the style's own width. Colour is used only where it tells
+curves apart: chains, thresholds, strips' parity, and beam against reactions.
+`--annotation-px=` and `--legend-px=` draw the annotations or the legends at
+another size, for comparison.
+
 | File | Content |
 |---|---|
-| `trapezoid` | matched pole-zero output for one pulse |
-| `polezero` | matched, under- and over-compensated tails |
-| `single` / `correction_train` | the two panels of one figure: (a) one right-chain pulse with the 37Cl settings, its read point, gain g and tail; (b) a four-pulse train on the right chain with an ideal baseline, the last pulse's shift the sum of the earlier pulses' tails at its read point, κ(Δt_i) h̃_i |
+| `trapezoid` | matched pole-zero output for one pulse, in black and grey |
+| `polezero` | under- and over-compensated tails |
+| `single` / `correction_train` | the two panels of one figure: (a) in black and grey, one right-chain pulse with the 37Cl settings, its read point, gain g and tail; (b) a four-pulse train on the right chain with an ideal baseline, the last pulse's shift the sum of the earlier pulses' tails at its read point, κ(Δt_i) h̃_i |
 | `spectrum_10kHz` / `spectrum_50kHz` | the two panels of one figure: simulated pulse-height spectra at 10 and 50 kHz, matched (left chain) against mismatched (right chain), before (dashed) and after (solid) the PulseHistory correction, with the running-average check |
 | `correction_kernel` | the kernels PulseHistory fits on the 50 kHz run with the running-average check, matched and mismatched chain, against the analytic kernel of Eq. (kerneltail) |
 | `spread_table.tex` | the simulated rms spread before and after correction at 10 and 50 kHz, matched and mismatched chain, for the two readings of the baseline check, in percent of the chain's own mean height. Not a figure: a table body (the tabular) for the paper to `\input` inside its own table float, which holds the caption and the label `tab:spread` (needs `siunitx`, `booktabs` and `amsmath`); a comment line at its top gives what the caption needs from the runs |
@@ -55,7 +63,7 @@ both, with the PNGs moved to `<out>/png/`.
 | `run70_baseline_change` | the mean change of the firmware baseline between consecutive pulses on the Long Strips, Right of run 70 (the paper's 37Cl diagnostic run), against the time between them, with CAEN's description at 10, 20 and 80 ADC and with no check; from `output/run70/run70_baseline.root` (`scripts/run70_baseline.sh`) |
 | `kernel_run97` | the long-left, long-right and short-left kernels fitted on run 97 |
 | `run97_deviation_R` | run 97 long-right profile before and after correction, to 40 us between pulses |
-| `run97_spectra` / `run97_spectra_corrected` | run 97's strip DeltaE spectra (the segmented strips S1-S16, each in units of its beam peak) before and after the correction, as MUSIC's events summary draws them; the two panels (a) and (b) of one figure |
+| `run97_spectra` / `run97_spectra_corrected` | run 97's strip DeltaE spectra (the segmented strips S1-S16, each in units of its beam peak) before and after the correction, on a log scale, odd strips (long segment left) blue and even strips (long segment right) red; the two panels (a) and (b) of one figure |
 | `reaction_traces_before` / `reaction_traces_after` | ten events MUSIC tagged as (α,n) in strip 3 and ten of its pure-beam events, strip by strip, before and after the correction (the same events in both) |
 
 The filter-response figures use unit-amplitude pulses, so their vertical

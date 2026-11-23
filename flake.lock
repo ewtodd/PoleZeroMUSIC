@@ -317,11 +317,11 @@
         "root-src": "root-src_2"
       },
       "locked": {
-        "lastModified": 1793212189,
-        "narHash": "sha256-vYl9+/gTk9QYOVggy9ePCYTsauUAFUZHh+8mrwSH/is=",
+        "lastModified": 1795374494,
+        "narHash": "sha256-WyxxIba4SWmgXygBpIWMkFV5y+4lgBFZu1oNG9oUFGQ=",
         "owner": "ewtodd",
         "repo": "Analysis-Utilities",
-        "rev": "623c4d6d496c4e58cb27e72211610c70f2ef34a8",
+        "rev": "0435a5ee434bcf55bae5e61c5d8c60dcf4014943",
         "type": "github"
       },
       "original": {
